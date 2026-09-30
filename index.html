@@ -203,6 +203,12 @@ table.csv td.empty-cell{color:var(--text-3)}
 .dl-bar .field{flex:1 1 240px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#152033;color:#fff;padding:10px 16px;border-radius:9px;font-size:13.5px;z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
 .toast.show{opacity:1}
+.toast{display:flex;align-items:center;gap:12px}
+.toast.actionable{pointer-events:auto}
+.toast-btn{border:0;background:transparent;color:#8fb8ff;font-weight:700;cursor:pointer;padding:2px 4px;font-size:13.5px;text-decoration:underline}
+.undo-group{display:inline-flex;gap:0}
+.undo-group .btn:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
+.undo-group .btn:last-child{border-top-left-radius:0;border-bottom-left-radius:0;border-left:0}
 
 /* Welcome */
 .welcome{display:flex;gap:14px;align-items:center;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius);padding:14px 16px;flex-wrap:wrap}
@@ -338,6 +344,10 @@ body.has-selbar .toast{bottom:96px}
       <button type="button" class="btn btn-primary" id="btn-guide" title="Open the user guide">? <span class="lbl-text">How to use</span></button>
       <button type="button" class="btn" id="btn-open" title="Open a CSV or Excel job file you made before">&#128194; <span class="lbl-text">Open file</span></button>
       <button type="button" class="btn" id="btn-example" title="Load a ready-made example with 5 jobs">&#9733; <span class="lbl-text">Load example</span></button>
+      <span class="undo-group" role="group" aria-label="Undo and redo">
+        <button type="button" class="btn" id="btn-undo" disabled>&#8630; <span class="lbl-text">Undo</span></button>
+        <button type="button" class="btn" id="btn-redo" disabled>&#8631; <span class="lbl-text">Redo</span></button>
+      </span>
       <button type="button" class="btn" id="btn-feedback" title="Tell us what to fix or improve">&#9993; <span class="lbl-text">Feedback</span></button>
       <button type="button" class="btn btn-ghost" id="btn-reset" title="Clear everything and start again">Start over</button>
       <button type="button" class="btn btn-ghost" id="btn-theme" title="Switch light or dark">&#9790;</button>
@@ -468,9 +478,10 @@ w[f]=1}i[b]=f;}}for(g=l.s.r+n;g<=l.e.r;++g){if((T[g]||{}).hidden)continue;var A=
 (function(){
 'use strict';
 /* ===== Version: change these two lines when you release a new version ===== */
-const APP_VERSION='2.2';
+const APP_VERSION='2.3';
 const APP_VERSION_DATE='September 2026';
 const VERSION_HISTORY=[
+  ['2.3','September 2026','Undo and Redo buttons (Ctrl+Z / Ctrl+Y) for the last 100 changes, plus an Undo link after deletes, moves, Start over, Load example and Open file.'],
   ['2.2','September 2026','Sets of test points: group test points and tick which tests each set runs; select many test points (Shift + click) and move them to a new or existing set; numbered ranges continue the numbering.'],
   ['2.1','September 2026','Delete job works everywhere (also in preview windows), Feedback button, disclaimer and version number, small fixes.'],
   ['2.0','September 2026','Rebuilt: several jobs in one CSV, A->B and B->A tests on the same test point, numbered ranges, paste from Excel, open existing files, built-in guide and rule checks.'],
@@ -566,7 +577,46 @@ let ui={panel:null,welcomeClosed:false,sel:new Set(),lastSel:null};
 
 function safeGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
 function safeSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
-function save(){safeSet(STORE_KEY,JSON.stringify(state));safeSet(LIB_KEY,JSON.stringify(library));safeSet(UI_KEY,JSON.stringify({welcomeClosed:ui.welcomeClosed}));}
+/* ---- Undo / Redo history ----
+   Every change is remembered (up to 100 steps) so the person can go back.
+   Quick typing in the same box counts as one step. */
+const hist={undo:[],redo:[],last:null,lastT:0,lastKind:''};
+function commitHistory(kind){
+  const cur=JSON.stringify(state);
+  if(hist.last===null){ hist.last=cur; updateUndoButtons(); return; }
+  if(cur===hist.last) return;
+  const now=Date.now();
+  if(kind==='typing'&&hist.lastKind==='typing'&&now-hist.lastT<2000){ hist.last=cur; hist.lastT=now; return; }
+  hist.undo.push(hist.last); if(hist.undo.length>100) hist.undo.shift();
+  hist.redo=[]; hist.last=cur; hist.lastT=now; hist.lastKind=kind; updateUndoButtons();
+}
+function updateUndoButtons(){
+  const u=$('btn-undo'), r=$('btn-redo'); if(!u) return;
+  u.disabled=!hist.undo.length; r.disabled=!hist.redo.length;
+  u.title=hist.undo.length?`Undo the last change (${hist.undo.length} step${hist.undo.length===1?'':'s'} available). Shortcut: Ctrl+Z`:'Nothing to undo yet';
+  r.title=hist.redo.length?'Redo the change you just undid. Shortcut: Ctrl+Y':'Nothing to redo';
+}
+function restoreSnapshot(snap){
+  state=JSON.parse(snap); state.jobs.forEach(normalizeJob);
+  if(!state.jobs.find(j=>j.id===state.activeJob)) state.activeJob=state.jobs[0].id;
+  hist.last=JSON.stringify(state); hist.lastKind='';
+  ui.sel.clear(); ui.panel=null;
+  $('set-filename').value=state.fileName||''; $('set-workspace').value=state.workspace||'';
+  renderEditor(); renderOutput(); persist(); updateUndoButtons();
+}
+function undo(){
+  flushTyping();
+  if(!hist.undo.length){ toast('Nothing to undo.'); return; }
+  hist.redo.push(JSON.stringify(state)); restoreSnapshot(hist.undo.pop());
+  toast(hist.undo.length?`Undone. ${hist.undo.length} more step${hist.undo.length===1?'':'s'} back available.`:'Undone. This is the oldest step I remember.',{redo:true});
+}
+function redo(){
+  if(!hist.redo.length){ toast('Nothing to redo.'); return; }
+  hist.undo.push(JSON.stringify(state)); restoreSnapshot(hist.redo.pop()); toast('Redone.',{undo:true});
+}
+function flushTyping(){ if(outTimer){ clearTimeout(outTimer); outTimer=null; renderOutput(); save('typing'); } }
+function persist(){safeSet(STORE_KEY,JSON.stringify(state));safeSet(LIB_KEY,JSON.stringify(library));safeSet(UI_KEY,JSON.stringify({welcomeClosed:ui.welcomeClosed}));}
+function save(kind){ commitHistory(kind||'action'); persist(); }
 function load(){
   try{const s=JSON.parse(safeGet(STORE_KEY)||'null'); if(s&&(s.version===2||s.version===3)&&Array.isArray(s.jobs)&&s.jobs.length){state=Object.assign(defaultState(),s); state.version=3;}}catch(e){}
   state.jobs.forEach(normalizeJob);
@@ -577,7 +627,12 @@ function load(){
 const job=()=>state.jobs.find(j=>j.id===state.activeJob);
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),2600);}
+function toast(msg,o={}){
+  const t=$('toast');
+  t.innerHTML=`<span>${esc(msg)}</span>${o.undo?'<button type="button" class="toast-btn" data-toast="undo">Undo</button>':''}${o.redo?'<button type="button" class="toast-btn" data-toast="redo">Redo</button>':''}`;
+  t.classList.add('show'); t.classList.toggle('actionable',!!(o.undo||o.redo));
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show','actionable'),o.undo||o.redo?6000:2600);
+}
 const testLabel=t=>t.sub?`${t.type}|${t.sub}`:t.type;
 const isEmail=e=>/^[^\s@|]+@[^\s@|]+\.[^\s@|]+$/.test(e);
 const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
@@ -928,7 +983,7 @@ function renderOutput(){
   renderSidebar();
 }
 let outTimer=null;
-function refreshSoon(){clearTimeout(outTimer);outTimer=setTimeout(()=>{renderOutput();save();},150);}
+function refreshSoon(){clearTimeout(outTimer);outTimer=setTimeout(()=>{outTimer=null;renderOutput();save('typing');},150);}
 function rerender(){renderEditor();renderOutput();save();}
 
 /* ================= ACTIONS ================= */
@@ -1010,8 +1065,8 @@ async function onClick(e){
       rerender(); break;}
     case 't-up': case 't-down': {const i=+b.dataset.i,k=i+(a==='t-up'?-1:1); [j.tests[i],j.tests[k]]=[j.tests[k],j.tests[i]]; rerender(); break;}
     case 't-del': {const t=j.tests.splice(+b.dataset.i,1)[0]; j.sets.forEach(x=>x.tests=x.tests.filter(y=>y!==t.id)); rerender(); break;}
-    case 'tests-clear': if(!await askConfirm(`All ${j.tests.length} test(s) will be removed from this job and from its sets.`,{title:'Remove all tests?',ok:'Remove all',danger:true})) return; j.tests=[]; j.sets.forEach(x=>x.tests=[]); rerender(); break;
-    case 'tests-all': {if(!await askConfirm(`The tests in the other ${state.jobs.length-1} job(s) will be replaced with this job's ${j.tests.length} test(s), and every set in those jobs will run all of them.`,{title:'Use these tests in all jobs?',ok:'Replace tests'})) return; state.jobs.forEach(x=>{ if(x===j) return; x.tests=j.tests.map(t=>({id:newId('t'),type:t.type,sub:t.sub})); x.sets.forEach(y=>y.tests=x.tests.map(t=>t.id));}); rerender(); toast('Tests copied to every job.'); break;}
+    case 'tests-clear': if(!await askConfirm(`All ${j.tests.length} test(s) will be removed from this job and from its sets.`,{title:'Remove all tests?',ok:'Remove all',danger:true})) return; j.tests=[]; j.sets.forEach(x=>x.tests=[]); rerender(); toast('All tests removed.',{undo:true}); break;
+    case 'tests-all': {if(!await askConfirm(`The tests in the other ${state.jobs.length-1} job(s) will be replaced with this job's ${j.tests.length} test(s), and every set in those jobs will run all of them.`,{title:'Use these tests in all jobs?',ok:'Replace tests'})) return; state.jobs.forEach(x=>{ if(x===j) return; x.tests=j.tests.map(t=>({id:newId('t'),type:t.type,sub:t.sub})); x.sets.forEach(y=>y.tests=x.tests.map(t=>t.id));}); rerender(); toast('Tests copied to every job.',{undo:true}); break;}
     // sets
     case 'set-toggle': {const tid=b.dataset.t; s.tests=s.tests.includes(tid)?s.tests.filter(x=>x!==tid):[...s.tests,tid]; rerender(); break;}
     case 'set-all': s.tests=j.tests.map(t=>t.id); rerender(); break;
@@ -1025,15 +1080,15 @@ async function onClick(e){
         if(!c) return;
         if(c==='del') j.points=j.points.filter(p=>p.set!==s.id); else pts.forEach(p=>p.set=other.id);
       }
-      j.sets=j.sets.filter(x=>x!==s); rerender(); toast('Set deleted.'); break;}
+      j.sets=j.sets.filter(x=>x!==s); rerender(); toast('Set deleted.',{undo:true}); break;}
     // selection
     case 'sel-clear': ui.sel.clear(); syncSelectionUI(); break;
     case 'sel-new': {
       const first=j.points.find(p=>ui.sel.has(p.id)); if(!first) return; const src=setOf(j,first);
       const ns=newSet(nextSetName(j),src.tests); j.sets.splice(j.sets.indexOf(src)+1,0,ns);
       const n=moveSelected(j,ns); rerender(); flash('set-'+ns.id);
-      toast(`Moved ${plural(n,'test point')} to ${ns.name}. Now click the tests to change what this set runs.`); break;}
-    case 'sel-del': {const n=ui.sel.size; if(!await askConfirm(`${plural(n,'test point')} will be removed from this job.`,{title:'Delete selected test points?',ok:'Delete',danger:true})) return; const had=new Set(j.sets.filter(x=>setPoints(j,x).length).map(x=>x.id)); j.points=j.points.filter(p=>!ui.sel.has(p.id)); ui.sel.clear(); if(j.sets.length>1) removeEmptiedSets(j,had); rerender(); break;}
+      toast(`Moved ${plural(n,'test point')} to ${ns.name}. Now click the tests to change what this set runs.`,{undo:true}); break;}
+    case 'sel-del': {const n=ui.sel.size; if(!await askConfirm(`${plural(n,'test point')} will be removed from this job.`,{title:'Delete selected test points?',ok:'Delete',danger:true})) return; const had=new Set(j.sets.filter(x=>setPoints(j,x).length).map(x=>x.id)); j.points=j.points.filter(p=>!ui.sel.has(p.id)); ui.sel.clear(); if(j.sets.length>1) removeEmptiedSets(j,had); rerender(); toast(`Deleted ${plural(n,'test point')}.`,{undo:true}); break;}
     // test points (inside a set)
     case 'panel-range': case 'panel-paste': {
       const type=a==='panel-range'?'range':'paste';
@@ -1045,7 +1100,7 @@ async function onClick(e){
     case 'range-go': {const rows=rangeRows(); if(!rows.length) return; rows.forEach(r=>j.points.push({id:newId('p'),name:r.name,ids:r.ids,set:s.id})); ui.panel=null; rerender(); toast(`Added ${plural(rows.length,'test point')}.`); break;}
     case 'paste-go': case 'paste-replace': {const rows=parsePasted($('paste-box').value,$('paste-header').checked,s.id); if(!rows.length){toast('Nothing to add. Paste some lines first.');return;} const cur=setPoints(j,s).length; if(a==='paste-replace'){ if(cur&&!await askConfirm(`The ${plural(cur,'test point')} already in ${j.sets.length>1?'this set':'this job'} will be replaced.`,{title:'Replace test points?',ok:'Replace',danger:true})) return; j.points=j.points.filter(p=>p.set!==s.id);} j.points.push(...rows); ui.panel=null; rerender(); toast(`Added ${plural(rows.length,'test point')}.`); break;}
     case 'add-point': {const sp=setPoints(j,s); const last=sp[sp.length-1]; j.points.push({id:newId('p'),name:'',ids:last?Object.assign({},last.ids):{},set:s.id}); rerender(); const inputs=$('set-'+s.id).querySelectorAll('[data-pf="name"]'); if(inputs.length) inputs[inputs.length-1].focus(); break;}
-    case 'clear-set-points': {const n=setPoints(j,s).length; if(!await askConfirm(`${plural(n,'test point')} will be removed${j.sets.length>1?` from "${setLabel(j,s)}"`:' from this job'}.`,{title:'Remove test points?',ok:'Remove all',danger:true})) return; j.points=j.points.filter(p=>p.set!==s.id); rerender(); break;}
+    case 'clear-set-points': {const n=setPoints(j,s).length; if(!await askConfirm(`${plural(n,'test point')} will be removed${j.sets.length>1?` from "${setLabel(j,s)}"`:' from this job'}.`,{title:'Remove test points?',ok:'Remove all',danger:true})) return; j.points=j.points.filter(p=>p.set!==s.id); rerender(); toast(`Removed ${plural(n,'test point')}.`,{undo:true}); break;}
     case 'pt-del': ui.sel.delete(j.points[pi].id); j.points.splice(pi,1); rerender(); break;
     case 'pt-dup': {const c=JSON.parse(JSON.stringify(j.points[pi])); c.id=newId('p'); j.points.splice(pi+1,0,c); rerender(); break;}
     case 'add-col': {const n=await askText('For example Location A, Port or Ribbon. It becomes a column called identifier_<name>, shared by all jobs.','',{title:'Add an identifier column',ok:'Add column',placeholder:'e.g. Location A',validate:colNameCheck(state.idCols)}); if(!n) return; state.idCols.push({id:newId('c'),name:n.trim()}); rerender(); break;}
@@ -1072,7 +1127,7 @@ function onChange(e){
   if(t.id==='nt-sub'){ const o=$('nt-sub-other'); o.classList.toggle('hidden',t.value!==OTHER); if(t.value===OTHER) o.focus(); return; }
   if(t.id==='quick-set'&&t.value){ addTests(QUICK_SETS[t.value]); rerender(); toast('Tests added.'); return; }
   if(t.id==='copy-tests'&&t.value){ const src=state.jobs.find(x=>x.id===t.value); addTests(src.tests.map(x=>[x.type,x.sub])); rerender(); toast(`Copied ${plural(src.tests.length,'test')}.`); return; }
-  if(t.id==='sel-target'&&t.value){ const target=j.sets.find(x=>x.id===t.value); const n=moveSelected(j,target); rerender(); flash('set-'+target.id); toast(`Moved ${plural(n,'test point')} to ${setLabel(j,target)}.`); return; }
+  if(t.id==='sel-target'&&t.value){ const target=j.sets.find(x=>x.id===t.value); const n=moveSelected(j,target); rerender(); flash('set-'+target.id); toast(`Moved ${plural(n,'test point')} to ${setLabel(j,target)}.`,{undo:true}); return; }
   if(t.dataset.rc){ ui.range.counter[t.dataset.rc]=t.checked; const inp=document.querySelector(`[data-rv="${t.dataset.rc}"]`); if(inp) inp.disabled=t.checked; updateRangePreview(); return; }
   if(t.dataset.colname||t.dataset.setname){ rerender(); return; }
   if(t.dataset.f==='dueDate'){ refreshSoon(); return; }
@@ -1166,7 +1221,7 @@ async function deleteJob(id){
   const idx=state.jobs.indexOf(j); state.jobs.splice(idx,1);
   if(!state.jobs.length) state.jobs.push(blankJob('Job-1'));
   if(state.activeJob===id) state.activeJob=state.jobs[Math.max(0,idx-1)].id;
-  ui.panel=null; rerender(); toast(`Deleted "${j.name.trim()||'untitled job'}".`);
+  ui.panel=null; rerender(); toast(`Deleted "${j.name.trim()||'untitled job'}".`,{undo:true});
 }
 
 /* ================= FEEDBACK =================
@@ -1303,7 +1358,7 @@ async function openFile(file){
     rerender();
     $('set-filename').value=state.fileName;
     let msg=`Opened ${res.jobs.length} job(s) from ${file.name}.`; if(res.ignored.length) msg+=` Ignored unknown columns: ${res.ignored.join(', ')}.`;
-    toast(msg); if(res.ignored.length||res.skipped) showMsg(msg+(res.skipped?` ${res.skipped} line(s) without a job name or test point name were skipped.`:''),'File opened');
+    toast(msg,{undo:true}); if(res.ignored.length||res.skipped) showMsg(msg+(res.skipped?` ${res.skipped} line(s) without a job name or test point name were skipped.`:''),'File opened');
   }catch(err){ showMsg(String(err&&err.message||err),'Could not open this file'); }
   finally{ $('file-open').value=''; }
 }
@@ -1323,7 +1378,7 @@ async function loadExample(){
     mk('Job-5',[],'Enterprise B','','South West','CD34',[['EtherBERT'],['RFC 2544']],[])
   ];
   state.activeJob=state.jobs[0].id; ui.panel=null; $('set-filename').value=state.fileName;
-  rerender(); toast('Example loaded: 5 jobs, 4 test points each.');
+  rerender(); toast('Example loaded: 5 jobs, 4 test points each.',{undo:true});
 }
 
 /* ================= GUIDE ================= */
@@ -1346,6 +1401,7 @@ const GUIDE=[
    <li>Attach test configuration files to a job.</li>
    <li>Open a file you made earlier (CSV or Excel), change it, and download it again.</li>
    <li>See the exact file before downloading, with every problem explained in plain words.</li>
+   <li>Undo and redo any change, including deletes and Start over.</li>
   </ul>`},
  {id:'quick',title:'Quick start (5 steps)',html:`
   <h3>Your first file in 5 steps</h3>
@@ -1498,6 +1554,9 @@ const GUIDE=[
   <p>Tick those 6 lines (Shift + click for a block), press <b>Move to a new set</b>, then click the tests in the new set to switch them on or off. Details in <b>Different tests for some test points</b>.</p>
   <h4>A test does not appear in the file</h4>
   <p>It is probably not ticked in any set. Check the round buttons above each test point table in section 3.</p>
+  <h4>I made a mistake. Can I go back?</h4>
+  <p>Yes. Press <b>Undo</b> at the top of the page (or Ctrl+Z, Cmd+Z on a Mac) to step back one change at a time. It remembers your last 100 changes, including deleted jobs, deleted or moved test points, removed tests and even <b>Start over</b>. Press <b>Redo</b> (Ctrl+Y) to go forward again. After a delete or move, a message at the bottom also offers <b>Undo</b>.</p>
+  <p>While you are typing inside a box, Ctrl+Z undoes the typing in that box only. Click outside the box first to undo whole changes. The undo history is cleared when you close or reload the page, but your current work stays saved.</p>
   <h4>Where is my work saved?</h4>
   <p>In this browser on this computer. Clearing browser data, or using a private window, removes it. Download your CSV to keep a safe copy, and use <b>Open file</b> to continue later.</p>
   <h4>I cannot delete a job</h4>
@@ -1505,7 +1564,7 @@ const GUIDE=[
   <h4>How do I send feedback or report a problem?</h4>
   <p>Press <b>Feedback</b> at the top (or <b>Send feedback</b> at the bottom of the page). Choose what it is about, write a few words, and press <b>Send by email</b>. Your email app opens with the message ready for the tool's team; just press Send. If you have no email app, use <b>Copy text</b> and paste it into any email. Your job data is never included.</p>
   <h4>How do I start again?</h4>
-  <p>Press <b>Start over</b> at the top. Saved emails and config names are kept.</p>
+  <p>Press <b>Start over</b> at the top. Saved emails and config names are kept. If you did it by accident, press <b>Undo</b> straight away.</p>
   <h4>Can I open the file in Excel?</h4>
   <p>Yes. Just save it as CSV again if you change it there, and keep the column names unchanged.</p>`}
 ];
@@ -1544,13 +1603,24 @@ function init(){
   $('btn-dup-job').onclick=()=>document.querySelector('[data-act="dup"]').click();
   $('btn-guide').onclick=()=>openGuide();
   $('btn-feedback').onclick=openFeedback;
+  $('btn-undo').onclick=undo; $('btn-redo').onclick=redo;
+  $('toast').addEventListener('click',e=>{const b=e.target.closest('[data-toast]'); if(!b) return; $('toast').classList.remove('show','actionable'); if(b.dataset.toast==='undo') undo(); else redo();});
+  document.addEventListener('keydown',e=>{
+    if(!(e.ctrlKey||e.metaKey)||e.altKey) return;
+    if(!$('modal-back').classList.contains('hidden')||($('guide')&&$('guide').open)) return;
+    const k=e.key.toLowerCase(); const t=e.target;
+    const typing=t&&(t.tagName==='TEXTAREA'||(t.tagName==='INPUT'&&!['checkbox','radio','button','file'].includes(t.type)));
+    if(typing) return; // let the text box undo its own typing
+    if(k==='z'&&!e.shiftKey){ e.preventDefault(); undo(); }
+    else if(k==='y'||(k==='z'&&e.shiftKey)){ e.preventDefault(); redo(); }
+  });
   $('btn-feedback-2').onclick=openFeedback;
   $('btn-guide-close').onclick=()=>$('guide').close();
   $('guide').addEventListener('click',e=>{ if(e.target===$('guide')) $('guide').close(); });
   $('btn-open').onclick=()=>$('file-open').click();
   $('file-open').onchange=e=>openFile(e.target.files[0]);
   $('btn-example').onclick=loadExample;
-  $('btn-reset').onclick=async()=>{ if(!await askConfirm('All jobs on screen will be cleared. Saved emails and config names are kept.',{title:'Start over?',ok:'Clear everything',danger:true})) return; const keep={workspace:state.workspace}; state=defaultState(); state.workspace=keep.workspace; ui.panel=null; $('set-filename').value=state.fileName; rerender(); };
+  $('btn-reset').onclick=async()=>{ if(!await askConfirm('All jobs on screen will be cleared. Saved emails and config names are kept. You can still press Undo right after.',{title:'Start over?',ok:'Clear everything',danger:true})) return; const keep={workspace:state.workspace}; state=defaultState(); state.workspace=keep.workspace; ui.sel.clear(); ui.panel=null; $('set-filename').value=state.fileName; rerender(); toast('Cleared. Changed your mind?',{undo:true}); };
   $('btn-theme').onclick=()=>{const next=currentDark()?'light':'dark'; applyTheme(next); safeSet('ojc2_theme',next); $('btn-theme').innerHTML=next==='dark'?'&#9728;':'&#9790;';};
   $('btn-download').onclick=download;
   $('btn-copy').onclick=copyCsv;
