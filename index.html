@@ -270,6 +270,28 @@ table.tp tr.sel td{background:var(--accent-soft)}
 body.has-selbar{padding-bottom:90px}
 body.has-selbar .toast{bottom:96px}
 
+/* Batches */
+.batch-step{border-top:1px dashed var(--border);padding-top:12px;margin-top:12px}
+.batch-step h4{font-size:14px;display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.step-dot{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
+.tp-scroll{max-height:380px;overflow:auto}
+.tp-scroll thead th{position:sticky;top:0;z-index:1}
+.chosen{display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-height:44px;padding:10px;border:2px solid var(--accent);border-radius:10px;background:var(--accent-soft);margin-bottom:12px}
+.chosen-empty{color:var(--warn);font-size:13.5px;font-weight:500}
+.chosen-test{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:4px 4px 4px 8px;font-size:13.5px}
+.ct-n{font-size:11px;font-weight:700;color:var(--text-3)}
+.ct-btns{display:inline-flex}
+.ct-btns button{border:0;background:transparent;color:var(--text-3);cursor:pointer;padding:0 5px;font-size:14px;line-height:1.4;border-radius:5px}
+.ct-btns button:hover:not([disabled]){background:var(--surface-3);color:var(--text)}
+.ct-btns button.del:hover{background:var(--err-soft);color:var(--err)}
+.ct-btns button[disabled]{opacity:.3;cursor:default}
+.pick{margin-bottom:12px}
+.pick-lbl{font-size:12.5px;font-weight:600;color:var(--text-2);margin-bottom:6px}
+.pick-group{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px}
+.pick-g{font-size:11.5px;color:var(--text-3);min-width:150px;font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.add-batch{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:14px;border:2px dashed var(--border-strong);border-radius:12px;margin-bottom:6px}
+@media (max-width:680px){.pick-g{min-width:100%}}
+
 /* In-page dialogs */
 .modal-back{position:fixed;inset:0;background:rgba(10,15,25,.55);z-index:200;display:grid;place-items:center;padding:16px}
 .modal{width:min(460px,100%);background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 50px rgba(0,0,0,.3);padding:20px;max-height:calc(100vh - 32px);overflow:auto}
@@ -326,6 +348,8 @@ body.has-selbar .toast{bottom:96px}
   .guide-nav button{white-space:nowrap}
   .brand p{display:none}
   .top-actions .lbl-text{display:none}
+  .top-actions{gap:5px}
+  .top-actions .btn{padding:6px 8px;min-height:32px}
 }
 </style>
 </head>
@@ -478,9 +502,10 @@ w[f]=1}i[b]=f;}}for(g=l.s.r+n;g<=l.e.r;++g){if((T[g]||{}).hidden)continue;var A=
 (function(){
 'use strict';
 /* ===== Version: change these two lines when you release a new version ===== */
-const APP_VERSION='2.3';
+const APP_VERSION='2.4';
 const APP_VERSION_DATE='September 2026';
 const VERSION_HISTORY=[
+  ['2.4','September 2026','Batches: each batch has its own test points (step A) and its own tests (step B, one click per test). Add as many batches as needed and move test points between batches.'],
   ['2.3','September 2026','Undo and Redo buttons (Ctrl+Z / Ctrl+Y) for the last 100 changes, plus an Undo link after deletes, moves, Start over, Load example and Open file.'],
   ['2.2','September 2026','Sets of test points: group test points and tick which tests each set runs; select many test points (Shift + click) and move them to a new or existing set; numbered ranges continue the numbering.'],
   ['2.1','September 2026','Delete job works everywhere (also in preview windows), Feedback button, disclaimer and version number, small fixes.'],
@@ -535,45 +560,52 @@ const QUICK_SETS={
 const OTHER='__other__';
 
 /* ================= STATE =================
-   A job has:
-   - tests:  the list of tests used in this job (order = order in the CSV)
-   - sets:   groups of test points; each set ticks which of the job's tests it runs
-   - points: test points; each belongs to one set (p.set) */
+   A job has batches (j.sets). Each batch holds:
+   - its own list of tests (s.tests = [{id,type,sub}], order = order in the CSV)
+   and test points point to their batch (p.set). */
 const STORE_KEY='ojc2_state', LIB_KEY='ojc2_library', UI_KEY='ojc2_ui';
 let uid=Date.now()%100000;
 const newId=p=>(p||'x')+(++uid).toString(36);
+const mkTest=(type,sub)=>({id:newId('t'),type,sub:sub||''});
 
-function newSet(name,testIds){ return {id:newId('s'),name:name||'Set 1',tests:(testIds||[]).slice()}; }
+function newSet(name,tests){ return {id:newId('s'),name:name||'Batch 1',tests:(tests||[]).map(t=>mkTest(t.type,t.sub))}; }
 function blankJob(name){
-  return {id:newId('j'),name:name||'',assignees:[],company:'',customer:'',dueDate:'',props:{},tests:[],configs:[],sets:[newSet('Set 1',[])],points:[]};
+  return {id:newId('j'),name:name||'',assignees:[],company:'',customer:'',dueDate:'',props:{},configs:[],sets:[newSet('Batch 1',[])],points:[]};
 }
 function normalizeJob(j){
-  j.tests=j.tests||[]; j.points=j.points||[]; j.props=j.props||{}; j.assignees=j.assignees||[]; j.configs=j.configs||[];
+  j.points=j.points||[]; j.props=j.props||{}; j.assignees=j.assignees||[]; j.configs=j.configs||[];
+  const pool=Array.isArray(j.tests)?j.tests:[];
   if(!Array.isArray(j.sets)||!j.sets.length){
-    // Older saves kept a per-test-point "off" list: turn each distinct combination into a set
+    // v2.1 saves: job-wide tests + per-test-point "off" list -> one batch per combination
     j.sets=[]; const bySig=new Map();
     j.points.forEach(p=>{
       const off=(p.off||[]).slice().sort(); const key=off.join(',');
-      if(!bySig.has(key)){ const s=newSet('Set '+(j.sets.length+1),j.tests.filter(t=>!off.includes(t.id)).map(t=>t.id)); bySig.set(key,s); j.sets.push(s); }
+      if(!bySig.has(key)){ const s={id:newId('s'),name:'Batch '+(j.sets.length+1),tests:pool.filter(t=>!off.includes(t.id)).map(t=>t.id)}; bySig.set(key,s); j.sets.push(s); }
       p.set=bySig.get(key).id;
     });
-    if(!j.sets.length) j.sets.push(newSet('Set 1',j.tests.map(t=>t.id)));
+    if(!j.sets.length) j.sets.push({id:newId('s'),name:'Batch 1',tests:pool.map(t=>t.id)});
   }
-  const tids=new Set(j.tests.map(t=>t.id));
-  j.sets.forEach((s,k)=>{ s.tests=(s.tests||[]).filter(x=>tids.has(x)); if(!s.name) s.name='Set '+(k+1); });
+  // v2.2/2.3 saves: batches ticked ids from the job-wide list -> copy real tests into each batch
+  j.sets.forEach((s,k)=>{
+    s.tests=s.tests||[];
+    if(s.tests.some(x=>typeof x==='string')){ const ids=s.tests; s.tests=pool.filter(t=>ids.includes(t.id)).map(t=>mkTest(t.type,t.sub)); }
+    s.tests=s.tests.filter(t=>t&&t.type);
+    s.name=String(s.name||'').replace(/^Set (\d+)$/,'Batch $1')||('Batch '+(k+1));
+  });
+  delete j.tests;
   const sids=new Set(j.sets.map(s=>s.id));
   j.points.forEach(p=>{ if(!sids.has(p.set)) p.set=j.sets[0].id; delete p.off; p.ids=p.ids||{}; });
   return j;
 }
 function defaultState(){
-  const s={version:3,dateFormat:'mdy',fileName:'jobs',workspace:'',
+  const s={version:4,dateFormat:'mdy',fileName:'jobs',workspace:'',
     idCols:[{id:newId('c'),name:'Cable ID'},{id:newId('c'),name:'Fiber ID'}],
     propCols:[],jobs:[],activeJob:null};
   const j=blankJob('Job-1'); s.jobs.push(j); s.activeJob=j.id; return s;
 }
 let state=defaultState();
 let library={emails:[],configs:[]};
-let ui={panel:null,welcomeClosed:false,sel:new Set(),lastSel:null};
+let ui={panel:null,welcomeClosed:false,sel:new Set(),lastSel:null,lastType:{}};
 
 function safeGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
 function safeSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
@@ -618,7 +650,7 @@ function flushTyping(){ if(outTimer){ clearTimeout(outTimer); outTimer=null; ren
 function persist(){safeSet(STORE_KEY,JSON.stringify(state));safeSet(LIB_KEY,JSON.stringify(library));safeSet(UI_KEY,JSON.stringify({welcomeClosed:ui.welcomeClosed}));}
 function save(kind){ commitHistory(kind||'action'); persist(); }
 function load(){
-  try{const s=JSON.parse(safeGet(STORE_KEY)||'null'); if(s&&(s.version===2||s.version===3)&&Array.isArray(s.jobs)&&s.jobs.length){state=Object.assign(defaultState(),s); state.version=3;}}catch(e){}
+  try{const s=JSON.parse(safeGet(STORE_KEY)||'null'); if(s&&s.version>=2&&s.version<=4&&Array.isArray(s.jobs)&&s.jobs.length){state=Object.assign(defaultState(),s); state.version=4;}}catch(e){}
   state.jobs.forEach(normalizeJob);
   try{const l=JSON.parse(safeGet(LIB_KEY)||'null'); if(l){library.emails=l.emails||[];library.configs=l.configs||[];}}catch(e){}
   try{const u=JSON.parse(safeGet(UI_KEY)||'null'); if(u) ui.welcomeClosed=!!u.welcomeClosed;}catch(e){}
@@ -638,14 +670,19 @@ const isEmail=e=>/^[^\s@|]+@[^\s@|]+\.[^\s@|]+$/.test(e);
 const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
 function nextJobName(){let n=state.jobs.length+1;const names=new Set(state.jobs.map(j=>j.name));while(names.has('Job-'+n))n++;return 'Job-'+n;}
 
-/* set helpers */
+/* batch helpers */
 const setOf=(j,p)=>j.sets.find(s=>s.id===p.set)||j.sets[0];
 const setPoints=(j,s)=>j.points.filter(p=>p.set===s.id);
-const setTests=(j,s)=>j.tests.filter(t=>s.tests.includes(t.id));
-const pointTests=(j,p)=>setTests(j,setOf(j,p));
+const pointTests=(j,p)=>setOf(j,p).tests;
 const orderedPoints=j=>j.sets.flatMap(s=>setPoints(j,s));
-const setLabel=(j,s)=>s.name.trim()||('Set '+(j.sets.indexOf(s)+1));
-function nextSetName(j){let n=j.sets.length+1; const names=new Set(j.sets.map(s=>s.name.trim())); while(names.has('Set '+n)) n++; return 'Set '+n;}
+const setLabel=(j,s)=>s.name.trim()||('Batch '+(j.sets.indexOf(s)+1));
+const jobTestLabels=j=>[...new Set(j.sets.flatMap(s=>s.tests.map(testLabel)))];
+function nextSetName(j){let n=j.sets.length+1; const names=new Set(j.sets.map(s=>s.name.trim())); while(names.has('Batch '+n)) n++; return 'Batch '+n;}
+function addTestsTo(s,list){
+  let added=0, dup=0;
+  list.forEach(([type,sub])=>{ sub=sub||''; if(s.tests.some(t=>t.type===type&&t.sub===sub)){dup++;return;} s.tests.push(mkTest(type,sub)); added++; });
+  return {added,dup};
+}
 
 /* ================= DATES ================= */
 function toIso(v){
@@ -709,33 +746,27 @@ function validate(){
     if(!j.name.trim()) add('err',j.id,P('give this job a name (Job ID). It is required.'),'name');
     else if(seen[j.name.trim()]>1) add('err',j.id,P('another job already uses this name. Each job needs its own name.'),'name');
     if(/[|]/.test(j.name)) add('err',j.id,P('job name cannot contain the | character.'),'name');
-    if(!j.tests.length) add('err',j.id,P('add at least one test (section 2).'),'tests');
-    if(!j.points.length) add('err',j.id,P('add at least one test point (section 3).'),'points');
+    if(!j.points.length) add('err',j.id,P('add at least one test point (section 2, step A).'),'points');
     const bad=j.assignees.filter(e=>!isEmail(e)); if(bad.length) add('err',j.id,P(`these assignees do not look like email addresses: ${bad.join(', ')}`),'assignees');
     if(j.dueDate&&!/^\d{4}-\d{2}-\d{2}$/.test(j.dueDate)) add('err',j.id,P(`due date "${j.dueDate}" is not a valid date.`),'due');
     j.configs.forEach(c=>{ if(!/\.[A-Za-z0-9]+$/.test(c)) add('warn',j.id,P(`config "${c}" has no file extension (e.g. .iolmcfg). The name must match the file exactly.`),'configs'); if(/\|/.test(c)) add('err',j.id,P(`config "${c}" cannot contain |.`),'configs'); });
-    const tl={}; j.tests.forEach(t=>{const l=testLabel(t); tl[l]=(tl[l]||0)+1;
-      if(/\|/.test(t.type)||/\|/.test(t.sub)) add('err',j.id,P(`test "${l}" contains an extra |.`),'tests');
-      if(!TYPE_INFO[t.type]){const match=ALL_TYPES.find(x=>x.t.toLowerCase()===t.type.toLowerCase()); if(match) add('warn',j.id,P(`test "${t.type}" should be written "${match.t}". Test names are case sensitive.`),'tests');}
-      if(t.type==='iOLM'&&t.sub==='AutoBidir') add('warn',j.id,P('iOLM AutoBidir only works on FTBx units.'),'tests');
-    });
-    Object.entries(tl).forEach(([l,c])=>{if(c>1) add('warn',j.id,P(`test "${l}" is listed ${c} times.`),'tests');});
-    // sets
+    const warned=new Set();
     j.sets.forEach(s=>{
-      const n=setPoints(j,s).length; const who=multi?`"${setLabel(j,s)}"`:'the test points';
-      if(n&&j.tests.length&&!s.tests.length) add('err',j.id,P(`${who} run no tests. Tick at least one test for ${multi?'that set':'them'} (section 3).`),'set:'+s.id);
-      if(!n&&multi) add('warn',j.id,P(`"${setLabel(j,s)}" has no test points and will be left out. Add test points or delete the set.`),'set:'+s.id);
+      const n=setPoints(j,s).length; const who=`"${setLabel(j,s)}"`;
+      if(n&&!s.tests.length) add('err',j.id,P(`${who} has ${plural(n,'test point')} but no tests. Choose at least one test for it (step B).`),'set:'+s.id);
+      if(!n&&multi) add('warn',j.id,P(`${who} has no test points and will be left out. Add test points or delete the batch.`),'set:'+s.id);
+      s.tests.forEach(t=>{ const l=testLabel(t);
+        if((/\|/.test(t.type)||/\|/.test(t.sub))&&!warned.has('p'+l)){warned.add('p'+l); add('err',j.id,P(`test "${l}" contains an extra |.`),'set:'+s.id);}
+        if(!TYPE_INFO[t.type]&&!warned.has('c'+t.type)){const match=ALL_TYPES.find(x=>x.t.toLowerCase()===t.type.toLowerCase()); if(match){warned.add('c'+t.type); add('warn',j.id,P(`test "${t.type}" should be written "${match.t}". Test names are case sensitive.`),'set:'+s.id);}}
+        if(t.type==='iOLM'&&t.sub==='AutoBidir'&&!warned.has('auto')){warned.add('auto'); add('warn',j.id,P('iOLM AutoBidir only works on FTBx units.'),'set:'+s.id);}
+      });
     });
-    if(multi){
-      const used=new Set(); j.sets.forEach(s=>{ if(setPoints(j,s).length) s.tests.forEach(x=>used.add(x)); });
-      j.tests.filter(t=>!used.has(t.id)).forEach(t=>add('warn',j.id,P(`test "${testLabel(t)}" is not ticked in any set, so it will not be in the file.`),'points'));
-      const sn={}; j.sets.forEach(s=>{const n=setLabel(j,s); sn[n]=(sn[n]||0)+1;}); Object.entries(sn).forEach(([n,c])=>{ if(c>1) add('warn',j.id,P(`two sets are called "${n}". Give them different names to avoid confusion.`),'points'); });
-    }
+    if(multi){ const sn={}; j.sets.forEach(s=>{const n=setLabel(j,s); sn[n]=(sn[n]||0)+1;}); Object.entries(sn).forEach(([n,c])=>{ if(c>1) add('warn',j.id,P(`two batches are called "${n}". Give them different names to avoid confusion.`),'points'); }); }
     const names={}; let emptyNames=0;
     j.points.forEach(p=>{const n=String(p.name||'').trim(); if(!n) emptyNames++; else names[n]=(names[n]||0)+1;});
     if(emptyNames) add('err',j.id,P(`${emptyNames} test point(s) have no name. Test point name is required.`),'points');
     const dups=Object.entries(names).filter(([,c])=>c>1).map(([n])=>n);
-    if(dups.length) add('err',j.id,P(`test point names must be unique inside a job, across all its sets (results are saved under this name). Repeated: ${dups.slice(0,4).join(', ')}${dups.length>4?'…':''}`),'points');
+    if(dups.length) add('err',j.id,P(`test point names must be unique inside a job, across all its batches (results are saved under this name). Repeated: ${dups.slice(0,4).join(', ')}${dups.length>4?'…':''}`),'points');
     const commaVals=j.points.some(p=>/[,"]/.test(p.name||'')||Object.values(p.ids||{}).some(v=>/[,"]/.test(v||'')));
     if(commaVals) add('warn',j.id,P('some values contain a comma or quote. They will be wrapped in quotes, which is valid CSV, but plain text is safer.'),'points');
     state.idCols.forEach(c=>{ if(!c.name.trim()) return; const filled=j.points.filter(p=>String((p.ids||{})[c.id]||'').trim()).length; if(filled&&filled<j.points.length) add('warn',j.id,P(`"${c.name}" is empty for ${j.points.length-filled} test point(s).`),'points'); });
@@ -753,11 +784,11 @@ function jobStatus(j){const l=lastIssues.filter(i=>i.jobId===j.id);return l.some
 function renderSidebar(){
   $('job-count').textContent=state.jobs.length;
   $('job-list').innerHTML=state.jobs.map(j=>{
-    const st=jobStatus(j);
+    const st=jobStatus(j); const nt=jobTestLabels(j).length;
     return `<li><button type="button" class="job-item ${j.id===state.activeJob?'active':''}" data-job="${j.id}">
       <span class="dot ${st==='ok'?'':st}" title="${st==='ok'?'Ready':st==='err'?'Needs fixing':'Check warnings'}"></span>
       <span><span class="job-item-name">${esc(j.name.trim()||'Untitled job')}</span>
-      <span class="job-item-meta">${plural(j.points.length,'test point')} · ${plural(j.tests.length,'test')}${j.sets.length>1?' · '+j.sets.length+' sets':''}</span></span></button><button type="button" class="job-del" data-deljob="${j.id}" title="Delete this job" aria-label="Delete ${esc(j.name.trim()||'untitled job')}">&times;</button></li>`;
+      <span class="job-item-meta">${plural(j.points.length,'test point')} · ${plural(nt,'test')}${j.sets.length>1?' · '+j.sets.length+' batches':''}</span></span></button><button type="button" class="job-del" data-deljob="${j.id}" title="Delete this job" aria-label="Delete ${esc(j.name.trim()||'untitled job')}">&times;</button></li>`;
   }).join('');
   $('set-date').value=state.dateFormat;
 }
@@ -776,8 +807,6 @@ function chipBox(kind,items,placeholder,listId){
 
 function renderEditor(){
   const j=job(); const ed=$('editor');
-  const others=state.jobs.filter(x=>x.id!==j.id&&x.tests.length);
-  const multi=j.sets.length>1;
   const welcome=ui.welcomeClosed?'':`<div class="welcome"><p><strong>New here?</strong>This page builds the CSV file you import into EXFO Exchange to create jobs. You can put many jobs in one file. The guide explains everything in plain words and takes about 2 minutes.</p><button type="button" class="btn btn-primary" data-act="open-guide">Read the guide</button><button type="button" class="btn" data-act="example">Show me an example</button><button type="button" class="btn btn-ghost" data-act="close-welcome">Hide</button></div>`;
 
   ed.innerHTML=`${welcome}
@@ -812,72 +841,81 @@ function renderEditor(){
     <div class="tools-row"><button type="button" class="btn btn-sm" data-act="add-prop">+ Add custom property</button><span class="hint" style="margin:0">e.g. Region, Site, Project. The name is shared by all jobs; each job has its own value.</span></div>
   </div>
 
-  <div class="card card-pad" id="sec-tests">
-    <div class="section-head"><div class="section-title"><span class="sec-num">2</span><div><h3>Tests in this job</h3><p>List every test this job needs. In section 3 you choose which of them each set of test points runs. Order here = order in the file.</p></div></div></div>
-    <div class="tests-list">${j.tests.length?j.tests.map((t,i)=>{const n=j.sets.filter(s=>s.tests.includes(t.id)).length; return `<div class="test-row"><span class="test-idx">${i+1}</span><span class="test-name">${esc(t.type)}</span>${t.sub?`<span class="test-sub">${esc(t.sub)}</span>`:''}${multi?`<span class="use-pill ${n?'':'none'}">${n===j.sets.length?'all sets':n?`${n} of ${j.sets.length} sets`:'no set'}</span>`:''}<span class="test-csv">${esc(testLabel(t))}</span><span class="btns"><button type="button" class="btn btn-ghost btn-icon" data-act="t-up" data-i="${i}" ${i===0?'disabled':''} aria-label="Move up">&#8593;</button><button type="button" class="btn btn-ghost btn-icon" data-act="t-down" data-i="${i}" ${i===j.tests.length-1?'disabled':''} aria-label="Move down">&#8595;</button><button type="button" class="btn btn-ghost btn-icon btn-danger" data-act="t-del" data-i="${i}" aria-label="Remove">&times;</button></span></div>`;}).join(''):`<div class="empty">No tests yet. Pick a test below and press <b>Add test</b>, or use a ready-made set.</div>`}</div>
-    <div class="add-test">
-      <div class="field"><label class="lbl" for="nt-type">Test</label><select class="input" id="nt-type">${typeOptions(ui.lastType||'FIP')}</select>
-        <input class="input hidden" id="nt-type-other" placeholder="Type the test name exactly" style="margin-top:6px"></div>
-      <div class="field"><label class="lbl" for="nt-sub">Direction / sub type</label><select class="input" id="nt-sub"></select>
-        <input class="input hidden" id="nt-sub-other" placeholder="Any label, e.g. Ring-1" style="margin-top:6px"></div>
-      <button type="button" class="btn btn-primary" data-act="add-test">Add test</button>
-      <button type="button" class="btn" data-act="add-both" id="btn-both" title="Adds the same test twice: once A->B and once B->A">+ Both directions</button>
-    </div>
-    <p class="unit-hint" id="nt-units"></p>
-    ${multi?`<p class="hint">New tests are ticked in every set. Untick them in section 3 where they are not needed.</p>`:''}
-    <div class="tools-row">
-      <select class="input" id="quick-set"><option value="">Add a ready-made set of tests…</option>${Object.keys(QUICK_SETS).map(k=>`<option>${esc(k)}</option>`).join('')}</select>
-      ${others.length?`<select class="input" id="copy-tests"><option value="">Copy tests from another job…</option>${others.map(o=>`<option value="${o.id}">${esc(o.name||'Untitled job')} (${o.tests.length})</option>`).join('')}</select>`:''}
-      ${state.jobs.length>1&&j.tests.length?`<button type="button" class="btn btn-sm" data-act="tests-all">Use these tests in all jobs</button>`:''}
-      ${j.tests.length?`<button type="button" class="btn btn-sm btn-ghost btn-danger" data-act="tests-clear">Remove all tests</button>`:''}
-    </div>
-  </div>
-
   <div class="card card-pad" id="sec-points">
-    <div class="section-head"><div class="section-title"><span class="sec-num">3</span><div><h3>Test points and their tests</h3><p>Test points live in <b>sets</b>. Each set runs the tests you tick. One set is enough when all test points run the same tests. To give some test points different tests, tick their boxes and press <b>Move to a new set</b>.</p></div></div></div>
+    <div class="section-head"><div class="section-title"><span class="sec-num">2</span><div><h3>Test points and their tests</h3><p>Work in <b>batches</b>. In each batch: <b>A</b> add the test points, <b>B</b> choose the tests they run (one test like FIP, or several). Other test points need other tests? Press <b>+ Add another batch</b> and repeat.</p></div></div></div>
     ${j.sets.map((s,k)=>setCard(j,s,k)).join('')}
+    <div class="add-batch">
+      <button type="button" class="btn btn-primary" data-act="set-add">+ Add another batch</button>
+      <span class="hint" style="margin:0">A new batch starts empty: add its test points, then pick its tests. Or tick test points above and press <b>Move to a new batch</b>.</span>
+    </div>
     <div class="tools-row">
-      <button type="button" class="btn" data-act="set-add">+ New empty set</button>
       <span class="hint" style="margin:0">Identifier columns (shared by all jobs): ${state.idCols.length?state.idCols.map(c=>`<b>${esc(c.name)}</b>`).join(', '):'none'}.</span>
       <button type="button" class="btn btn-sm" data-act="add-col">+ Add identifier column</button>
     </div>
   </div>
 
   <div class="card card-pad" id="sec-configs">
-    <div class="section-head"><div class="section-title"><span class="sec-num">4</span><div><h3>Test configuration files <span class="optional">(optional)</span></h3><p>Settings files the instrument should use for this job. Type the exact file name including the extension, then press Enter.</p></div></div></div>
+    <div class="section-head"><div class="section-title"><span class="sec-num">3</span><div><h3>Test configuration files <span class="optional">(optional)</span></h3><p>Settings files the instrument should use for this job. Type the exact file name including the extension, then press Enter.</p></div></div></div>
     ${chipBox('configs',j.configs,'e.g. OTDR config.otc','dl-configs')}
     <p class="hint">Names are case sensitive and must already be uploaded to Exchange before you import the CSV. They apply to the whole job, not to single test points.</p>
   </div>`;
-  refreshTypeHint();
+  document.querySelectorAll('.set-card').forEach(refreshTypeHint);
   renderSelBar();
 }
 
 function setCard(j,s,k){
   const multi=j.sets.length>1; const pts=setPoints(j,s);
-  const on=new Set(s.tests); const nOn=setTests(j,s).length;
   const panel=ui.panel&&ui.panel.set===s.id?ui.panel.type:null;
   const allSel=pts.length&&pts.every(p=>ui.sel.has(p.id));
-  return `<div class="set-card ${multi?'multi':''}" id="set-${s.id}" data-set="${s.id}">
+  const has=(type,sub)=>s.tests.some(t=>t.type===type&&t.sub===(sub||''));
+  const copySources=[]; state.jobs.forEach(x=>x.sets.forEach(y=>{ if(y!==s&&y.tests.length) copySources.push({id:x.id+':'+y.id,label:(x===j?'':`${x.name||'Untitled job'} · `)+setLabel(x,y)+` (${y.tests.map(testLabel).join(', ')})`}); }));
+  const lastType=ui.lastType[s.id]||'OTDR';
+  return `<div class="set-card" id="set-${s.id}" data-set="${s.id}">
     <div class="set-head">
-      ${multi?`<span class="set-tag">Set ${k+1}</span><input class="set-name" data-setname="${s.id}" value="${esc(s.name)}" aria-label="Set name" title="Rename this set (only for you, not written to the file)">`:`<span class="set-title">All test points in this job</span>`}
-      <span class="set-meta">${plural(pts.length,'test point')}</span>
-      ${multi?`<span class="set-btns"><button type="button" class="btn btn-ghost btn-icon" data-act="set-up" ${k===0?'disabled':''} title="Move set up" aria-label="Move set up">&#8593;</button><button type="button" class="btn btn-ghost btn-icon" data-act="set-down" ${k===j.sets.length-1?'disabled':''} title="Move set down" aria-label="Move set down">&#8595;</button><button type="button" class="btn btn-ghost btn-sm btn-danger" data-act="set-del">Delete set</button></span>`:''}
+      <span class="set-tag">Batch ${k+1}</span>
+      <input class="set-name" data-setname="${s.id}" value="${esc(s.name)}" aria-label="Batch name" title="Rename this batch (only for you, not written to the file)">
+      <span class="set-meta">${plural(pts.length,'test point')} · ${s.tests.length?`runs <b>${esc(s.tests.map(testLabel).join(', '))}</b>`:'<span style="color:var(--warn)">no tests chosen yet</span>'}</span>
+      ${multi?`<span class="set-btns"><button type="button" class="btn btn-ghost btn-icon" data-act="set-up" ${k===0?'disabled':''} title="Move batch up" aria-label="Move batch up">&#8593;</button><button type="button" class="btn btn-ghost btn-icon" data-act="set-down" ${k===j.sets.length-1?'disabled':''} title="Move batch down" aria-label="Move batch down">&#8595;</button><button type="button" class="btn btn-ghost btn-sm btn-danger" data-act="set-del">Delete batch</button></span>`:''}
     </div>
-    <div class="set-tests">
-      <span class="set-tests-lbl">${multi?'This set runs':'These test points run'}:</span>
-      ${j.tests.length?j.tests.map(t=>`<button type="button" class="tt ${on.has(t.id)?'on':''}" data-act="set-toggle" data-t="${t.id}" aria-pressed="${on.has(t.id)}" title="${on.has(t.id)?'Click to stop running this test':'Click to run this test'} for ${multi?'this set':'these test points'}"><span class="tt-box">${on.has(t.id)?'&#10003;':''}</span>${esc(testLabel(t))}</button>`).join('')+
-        `<span class="tt-links">${nOn<j.tests.length?`<button type="button" class="linkish" data-act="set-all">tick all</button>`:''}${nOn?`<button type="button" class="linkish" data-act="set-none">untick all</button>`:''}</span>`
-        :`<span class="hint" style="margin:0">Add tests in section 2 first.</span>`}
+
+    <div class="batch-step">
+      <h4><span class="step-dot">A</span> Test points in this batch</h4>
+      <div class="tp-toolbar">
+        <button type="button" class="btn btn-sm ${panel==='range'?'btn-primary':''}" data-act="panel-range">&#9776; Add a numbered range</button>
+        <button type="button" class="btn btn-sm ${panel==='paste'?'btn-primary':''}" data-act="panel-paste">&#128203; Paste a list</button>
+        <button type="button" class="btn btn-sm" data-act="add-point">+ Add one</button>
+        ${pts.length?`<button type="button" class="btn btn-sm btn-ghost btn-danger" data-act="clear-set-points">Remove all in this batch</button>`:''}
+      </div>
+      ${panel==='range'?rangePanel():''}
+      ${panel==='paste'?pastePanel():''}
+      ${pts.length?pointsTable(j,pts,allSel):`<div class="empty">No test points in this batch yet. Use <b>Add a numbered range</b> (e.g. Cable001 - Fiber01 to Fiber96) or <b>Paste a list</b> from Excel.</div>`}
     </div>
-    <div class="tp-toolbar">
-      <button type="button" class="btn btn-sm ${panel==='range'?'btn-primary':''}" data-act="panel-range">&#9776; Add a numbered range</button>
-      <button type="button" class="btn btn-sm ${panel==='paste'?'btn-primary':''}" data-act="panel-paste">&#128203; Paste a list</button>
-      <button type="button" class="btn btn-sm" data-act="add-point">+ Add one</button>
-      ${pts.length?`<button type="button" class="btn btn-sm btn-ghost btn-danger" data-act="clear-set-points">Remove all ${multi?'in this set':''}</button>`:''}
+
+    <div class="batch-step">
+      <h4><span class="step-dot">B</span> Tests for the test points in this batch</h4>
+      <div class="chosen">
+        ${s.tests.length?s.tests.map((t,i)=>`<span class="chosen-test"><span class="ct-n">${i+1}</span><b>${esc(t.type)}</b>${t.sub?`<span class="test-sub">${esc(t.sub)}</span>`:''}<span class="ct-btns"><button type="button" data-act="bt-left" data-i="${i}" ${i===0?'disabled':''} aria-label="Move earlier" title="Move earlier">&#8592;</button><button type="button" data-act="bt-right" data-i="${i}" ${i===s.tests.length-1?'disabled':''} aria-label="Move later" title="Move later">&#8594;</button><button type="button" class="del" data-act="bt-del" data-i="${i}" aria-label="Remove ${esc(testLabel(t))}" title="Remove">&times;</button></span></span>`).join(''):`<span class="chosen-empty">No tests chosen yet. Click a test below.</span>`}
+      </div>
+      <div class="pick">
+        <p class="pick-lbl">Click to add or remove a test (no direction):</p>
+        ${TEST_GROUPS.map(g=>`<div class="pick-group"><span class="pick-g">${esc(g.label.replace(' (no special instrument)',''))}</span>${g.types.map(x=>`<button type="button" class="tt ${has(x.t,'')?'on':''}" data-act="bt-toggle" data-type="${esc(x.t)}" aria-pressed="${has(x.t,'')}" title="${esc(x.t)} runs on ${esc(x.units)}"><span class="tt-box">${has(x.t,'')?'&#10003;':''}</span>${esc(x.t)}</button>`).join('')}</div>`).join('')}
+      </div>
+      <div class="add-test">
+        <div class="field"><label class="lbl">Test with a direction or label</label><select class="input" data-nt="type" aria-label="Test">${typeOptions(lastType)}</select>
+          <input class="input hidden" data-nt="type-other" placeholder="Type the test name exactly" style="margin-top:6px"></div>
+        <div class="field"><label class="lbl">Direction / sub type</label><select class="input" data-nt="sub" aria-label="Direction or sub type"></select>
+          <input class="input hidden" data-nt="sub-other" placeholder="Any label, e.g. Ring-1" style="margin-top:6px"></div>
+        <button type="button" class="btn btn-primary" data-act="bt-add">Add</button>
+        <button type="button" class="btn" data-act="bt-both" data-nt="both" title="Adds the test twice: A->B and B->A">+ Both directions</button>
+      </div>
+      <p class="unit-hint" data-nt="units"></p>
+      <div class="tools-row">
+        <select class="input" data-nt="quick" aria-label="Add a ready-made combination"><option value="">Add a ready-made combination…</option>${Object.keys(QUICK_SETS).map(q=>`<option>${esc(q)}</option>`).join('')}</select>
+        ${copySources.length?`<select class="input" data-nt="copy" aria-label="Copy tests from another batch"><option value="">Copy tests from…</option>${copySources.map(c=>`<option value="${c.id}">${esc(c.label)}</option>`).join('')}</select>`:''}
+        ${multi&&s.tests.length?`<button type="button" class="btn btn-sm" data-act="bt-to-all" title="Give every batch in this job exactly these tests">Use these tests in all batches</button>`:''}
+        ${s.tests.length?`<button type="button" class="btn btn-sm btn-ghost btn-danger" data-act="bt-clear">Remove all tests</button>`:''}
+      </div>
     </div>
-    ${panel==='range'?rangePanel():''}
-    ${panel==='paste'?pastePanel(multi):''}
-    ${pts.length?pointsTable(j,pts,allSel):`<div class="empty">${multi?'This set is empty. Tick test points in another set and use <b>Move to</b>, or add new ones with the buttons above.':'No test points yet. Use <b>Add a numbered range</b> for fibers like Cable001 - Fiber01 to Fiber96, or <b>Paste a list</b> from Excel.'}</div>`}
   </div>`;
 }
 function rangePanel(){
@@ -915,20 +953,20 @@ function updateRangePreview(){
   el.innerHTML=`Will add <b>${rows.length}</b>: <code>${esc(first.name)}</code>${idTxt(first)}${rows.length>1?` … to <code>${esc(last.name)}</code>`:''}${clash?` <span style="color:var(--err)">(${clash} of these names already exist in this job)</span>`:''}`;
   $('r-go').textContent=`Add ${plural(rows.length,'test point')}`;
 }
-function pastePanel(multi){
+function pastePanel(){
   const cols=['Test point name',...state.idCols.map(c=>c.name||'Unnamed')];
   return `<div class="tp-panel"><h4>Paste a list of test points</h4>
     <p class="hint" style="margin:0 0 8px">Copy cells from Excel and paste them here. One test point per line. Column order: <b>${cols.map(esc).join('</b> then <b>')}</b>. If you only have names, paste just the names.</p>
     <textarea class="input" id="paste-box" placeholder="Cable001 - Fiber01&#9;1&#9;1&#10;Cable001 - Fiber02&#9;1&#9;2"></textarea>
     <label class="check"><input type="checkbox" id="paste-header"> The first line is a header row (skip it)</label>
-    <div class="tools-row"><button type="button" class="btn btn-primary" data-act="paste-go">Add these test points</button><button type="button" class="btn" data-act="paste-replace">Replace ${multi?'this set\'s':'all'} test points with these</button><button type="button" class="btn btn-ghost" data-act="panel-close">Cancel</button></div>
+    <div class="tools-row"><button type="button" class="btn btn-primary" data-act="paste-go">Add these test points</button><button type="button" class="btn" data-act="paste-replace">Replace this batch's test points with these</button><button type="button" class="btn btn-ghost" data-act="panel-close">Cancel</button></div>
   </div>`;
 }
 function pointsTable(j,pts,allSel){
   const cols=state.idCols;
   const names={}; j.points.forEach(p=>{const n=String(p.name||'').trim(); if(n) names[n]=(names[n]||0)+1;});
-  return `<div class="table-wrap"><table class="tp"><thead><tr>
-    <th class="selcol"><input type="checkbox" data-selall ${allSel?'checked':''} aria-label="Select all test points in this set" title="Select all in this set"></th>
+  return `<div class="table-wrap tp-scroll"><table class="tp"><thead><tr>
+    <th class="selcol"><input type="checkbox" data-selall ${allSel?'checked':''} aria-label="Select all test points in this batch" title="Select all in this batch"></th>
     <th>#</th><th>Test point name <span style="color:var(--err)">*</span></th>
     ${cols.map(c=>`<th><div class="col-head"><input value="${esc(c.name)}" data-colname="${c.id}" aria-label="Identifier column name" title="Rename column (applies to all jobs)"><button type="button" class="x" data-act="del-col" data-col="${c.id}" title="Remove this column from all jobs">&times;</button></div><span class="col-tag">identifier</span></th>`).join('')}
     <th><button type="button" class="btn btn-sm" data-act="add-col" title="Add another identifier column">+ Column</button></th><th></th></tr></thead><tbody>
@@ -937,7 +975,7 @@ function pointsTable(j,pts,allSel){
       ${cols.map(c=>`<td><input class="cell" data-pid="${c.id}" value="${esc((p.ids||{})[c.id]||'')}" aria-label="${esc(c.name)} ${i+1}"></td>`).join('')}<td></td>
       <td style="white-space:nowrap"><button type="button" class="btn btn-ghost btn-icon" data-act="pt-dup" title="Copy this line">&#10697;</button><button type="button" class="btn btn-ghost btn-icon btn-danger" data-act="pt-del" aria-label="Remove test point">&times;</button></td></tr>`;}).join('')}
     </tbody></table></div>
-    <p class="tp-footer"><span>Tip: tick boxes to select test points. Hold <b>Shift</b> and click another box to select everything in between.</span></p>`;
+    <p class="tp-footer"><span>Tip: tick boxes to select test points (Shift + click selects a block), then move them to another batch to give them different tests.</span></p>`;
 }
 function renderSelBar(){
   let bar=$('selbar');
@@ -949,8 +987,8 @@ function renderSelBar(){
   const targets=j.sets.filter(s=>!(selSets.size===1&&selSets.has(s.id)));
   bar.classList.remove('hidden');
   bar.innerHTML=`<div class="selbar-inner"><b>${plural(n,'test point')} selected</b>
-    <button type="button" class="btn btn-primary btn-sm" data-act="sel-new" title="Put the selected test points in a new set, then choose its tests">Move to a new set</button>
-    ${targets.length?`<select class="input" id="sel-target" aria-label="Move selected test points to a set"><option value="">Move to set…</option>${targets.map(s=>`<option value="${s.id}">${esc(setLabel(j,s))} (${plural(setPoints(j,s).length,'point')})</option>`).join('')}</select>`:''}
+    <button type="button" class="btn btn-primary btn-sm" data-act="sel-new" title="Put the selected test points in a new batch, then choose its tests">Move to a new batch</button>
+    ${targets.length?`<select class="input" id="sel-target" aria-label="Move selected test points to a batch"><option value="">Move to batch…</option>${targets.map(s=>`<option value="${s.id}">${esc(setLabel(j,s))} (${s.tests.length?esc(s.tests.map(testLabel).join(', ')):'no tests'})</option>`).join('')}</select>`:''}
     <button type="button" class="btn btn-sm btn-danger" data-act="sel-del">Delete</button>
     <button type="button" class="btn btn-sm btn-ghost" data-act="sel-clear">Clear selection</button></div>`;
 }
@@ -959,13 +997,15 @@ function syncSelectionUI(){
   document.querySelectorAll('.set-card').forEach(card=>{const ids=[...card.querySelectorAll('tr[data-pt]')].map(tr=>tr.dataset.pt); const all=card.querySelector('[data-selall]'); if(all){all.checked=ids.length&&ids.every(id=>ui.sel.has(id)); all.indeterminate=!all.checked&&ids.some(id=>ui.sel.has(id));}});
   renderSelBar();
 }
-function refreshTypeHint(){
-  const sel=$('nt-type'); if(!sel) return; const v=sel.value;
-  $('nt-type-other').classList.toggle('hidden',v!==OTHER);
-  $('nt-sub').innerHTML=subOptions(v); $('nt-sub-other').classList.add('hidden');
+function refreshTypeHint(card){
+  const q=k=>card.querySelector(`[data-nt="${k}"]`);
+  const sel=q('type'); if(!sel) return; const v=sel.value;
+  q('type-other').classList.toggle('hidden',v!==OTHER);
+  q('sub').innerHTML=subOptions(v); q('sub-other').classList.add('hidden');
   const info=TYPE_INFO[v];
-  $('nt-units').innerHTML=info?`<b>${esc(v)}</b> runs on: ${esc(info.units)}.${info.subs.length?' Direction is optional.':''}`:v===OTHER?'Custom names are allowed (e.g. a generic task). Spelling and capitals must match what Exchange expects.':'';
-  $('btn-both').disabled=!(info&&info.subs.includes('A->B'))&&v!==OTHER;
+  if(info&&info.subs.includes('A->B')) q('sub').value='A->B';
+  q('units').innerHTML=info?`<b>${esc(v)}</b> runs on: ${esc(info.units)}.`:v===OTHER?'Custom names are allowed (e.g. a generic task). Spelling and capitals must match what Exchange expects.':'';
+  q('both').disabled=!(info&&info.subs.includes('A->B'))&&v!==OTHER;
 }
 
 /* ================= RENDER: OUTPUT ================= */
@@ -987,15 +1027,9 @@ function refreshSoon(){clearTimeout(outTimer);outTimer=setTimeout(()=>{outTimer=
 function rerender(){renderEditor();renderOutput();save();}
 
 /* ================= ACTIONS ================= */
-function addTests(list){
-  const j=job(); let added=0;
-  list.forEach(([type,sub])=>{ const t={id:newId('t'),type,sub:sub||''}; j.tests.push(t); j.sets.forEach(s=>s.tests.push(t.id)); added++; });
-  if(added&&j.sets.length>1) setTimeout(()=>toast(`Added to every set. Untick ${added===1?'it':'them'} in section 3 where not needed.`),10);
-}
 function cloneJob(src,name){
-  const tmap={}, smap={}; const c=JSON.parse(JSON.stringify(src)); c.id=newId('j'); c.name=name;
-  c.tests.forEach(t=>{const n=newId('t'); tmap[t.id]=n; t.id=n;});
-  c.sets.forEach(s=>{const n=newId('s'); smap[s.id]=n; s.id=n; s.tests=s.tests.map(x=>tmap[x]).filter(Boolean);});
+  const smap={}; const c=JSON.parse(JSON.stringify(src)); c.id=newId('j'); c.name=name;
+  c.sets.forEach(s=>{const n=newId('s'); smap[s.id]=n; s.id=n; s.tests=s.tests.map(t=>mkTest(t.type,t.sub));});
   c.points.forEach(p=>{p.id=newId('p'); p.set=smap[p.set]||c.sets[0].id;});
   return c;
 }
@@ -1016,20 +1050,31 @@ function parsePasted(text,skipHeader,setId){
   return lines.map(l=>{const parts=l.split('\t'); const ids={}; state.idCols.forEach((c,k)=>{ids[c.id]=(parts[k+1]||'').trim();}); return {id:newId('p'),name:(parts[0]||'').trim(),ids,set:setId};});
 }
 function removeEmptiedSets(j,before){
-  // drop sets that had test points before a move and are now empty (keep at least one set)
-  j.sets=j.sets.filter(s=>!(before.has(s.id)&&!setPoints(j,s).length)||j.sets.length===1);
-  if(!j.sets.length) j.sets.push(newSet('Set 1',j.tests.map(t=>t.id)));
+  // drop batches that had test points before a move and are now empty (keep at least one)
+  const keep=j.sets.filter(s=>!(before.has(s.id)&&!setPoints(j,s).length));
+  j.sets=keep.length?keep:[j.sets[0]];
 }
 function moveSelected(j,target){
   const hadPoints=new Set(j.sets.filter(s=>setPoints(j,s).length).map(s=>s.id));
   let n=0; j.points.forEach(p=>{ if(ui.sel.has(p.id)){ p.set=target.id; n++; } });
-  removeEmptiedSets(j,hadPoints); ui.sel.clear(); return n;
+  removeEmptiedSets(j,hadPoints); if(!j.sets.includes(target)) j.sets.push(target); ui.sel.clear(); return n;
 }
 function flash(id){ setTimeout(()=>{const el=$(id); if(!el) return; el.scrollIntoView({behavior:'smooth',block:'start'}); el.classList.add('flash'); setTimeout(()=>el.classList.remove('flash'),1600);},30); }
+function readAdder(card){
+  const q=k=>card.querySelector(`[data-nt="${k}"]`);
+  let type=q('type').value; if(type===OTHER){ type=q('type-other').value.trim(); if(!type){ toast('Type the test name first.'); q('type-other').focus(); return null; } }
+  let sub=q('sub').value; if(sub===OTHER) sub=q('sub-other').value.trim();
+  if(/\|/.test(type)||/\|/.test(sub)){ toast('Please do not use the | character.'); return null; }
+  return {type,sub,raw:q('type').value};
+}
+function reportAdd(res,s){
+  if(res.added&&res.dup) toast(`Added ${plural(res.added,'test')}. ${plural(res.dup,'test')} were already in ${s.name}.`);
+  else if(res.dup&&!res.added) toast(`Already in ${s.name}.`);
+}
 
 async function onClick(e){
   const go=e.target.closest('[data-go]');
-  if(go){ state.activeJob=go.dataset.go; ui.panel=null; ui.sel.clear(); rerender(); const w=go.dataset.where||''; const target=w.startsWith('set:')?'set-'+w.slice(4):({name:'f-name',tests:'sec-tests',points:'sec-points',configs:'sec-configs',assignees:'sec-details',due:'sec-details',details:'sec-details'}[w]||'f-name'); const el=$(target); if(el){el.scrollIntoView({behavior:'smooth',block:'center'}); if(el.focus&&el.tagName==='INPUT') setTimeout(()=>el.focus(),300); el.classList.add('flash'); setTimeout(()=>el.classList.remove('flash'),1600);} return; }
+  if(go){ state.activeJob=go.dataset.go; ui.panel=null; ui.sel.clear(); rerender(); const w=go.dataset.where||''; const target=w.startsWith('set:')?'set-'+w.slice(4):({name:'f-name',points:'sec-points',configs:'sec-configs',assignees:'sec-details',due:'sec-details',details:'sec-details'}[w]||'f-name'); const el=$(target); if(el){el.scrollIntoView({behavior:'smooth',block:'center'}); if(el.focus&&el.tagName==='INPUT') setTimeout(()=>el.focus(),300); el.classList.add('flash'); setTimeout(()=>el.classList.remove('flash'),1600);} return; }
   const dj=e.target.closest('[data-deljob]'); if(dj){ await deleteJob(dj.dataset.deljob); return; }
   const ji=e.target.closest('[data-job]'); if(ji){selectJob(ji.dataset.job);return;}
   const cd=e.target.closest('[data-chip-del]'); if(cd){const j=job(); j[cd.dataset.chipDel].splice(+cd.dataset.i,1); rerender(); return;}
@@ -1050,46 +1095,39 @@ async function onClick(e){
     case 'open-about': openGuide('about'); break;
     case 'example': loadExample(); break;
     case 'close-welcome': ui.welcomeClosed=true; rerender(); break;
-    case 'dup': {const c=cloneJob(j,dupName(j.name)); state.jobs.splice(state.jobs.indexOf(j)+1,0,c); state.activeJob=c.id; ui.sel.clear(); rerender(); toast(`Copied into "${c.name}". Change what is different.`); break;}
+    case 'dup': {const c=cloneJob(j,dupName(j.name)); state.jobs.splice(state.jobs.indexOf(j)+1,0,c); state.activeJob=c.id; ui.sel.clear(); rerender(); toast(`Copied into "${c.name}". Change what is different.`,{undo:true}); break;}
     case 'del-job': await deleteJob(j.id); break;
     case 'move-up': case 'move-down': {const i=state.jobs.indexOf(j), k=i+(a==='move-up'?-1:1); if(k<0||k>=state.jobs.length) return; [state.jobs[i],state.jobs[k]]=[state.jobs[k],state.jobs[i]]; rerender(); break;}
     case 'add-prop': {const n=await askText('For example Region or Site. It becomes a column called customProperty_<name>, and each job gets its own value.','',{title:'Add a custom property',ok:'Add property',placeholder:'e.g. Region',validate:colNameCheck(state.propCols)}); if(!n) return; state.propCols.push({id:newId('c'),name:n.trim()}); rerender(); break;}
     case 'rename-prop': {const c=state.propCols.find(x=>x.id===b.dataset.col); const n=await askText('The new name applies to all jobs.',c.name,{title:'Rename property',ok:'Rename',validate:colNameCheck(state.propCols,c)}); if(!n) return; c.name=n.trim(); rerender(); break;}
     case 'del-prop': {const c=state.propCols.find(x=>x.id===b.dataset.col); const used=state.jobs.filter(x=>String(x.props[c.id]||'').trim()).length; if(used&&!await askConfirm(`${used} job(s) have a value in "${c.name}". It will be removed from all jobs.`,{title:'Remove this property?',ok:'Remove',danger:true})) return; state.propCols=state.propCols.filter(x=>x!==c); state.jobs.forEach(x=>delete x.props[c.id]); rerender(); break;}
-    case 'add-test': case 'add-both': {
-      let type=$('nt-type').value; if(type===OTHER){type=$('nt-type-other').value.trim(); if(!type){toast('Type the test name first.'); $('nt-type-other').focus(); return;}}
-      let sub=$('nt-sub').value; if(sub===OTHER){sub=$('nt-sub-other').value.trim();}
-      if(/\|/.test(type)||/\|/.test(sub)){toast('Please do not use the | character.');return;}
-      ui.lastType=$('nt-type').value;
-      if(a==='add-both') addTests([[type,'A->B'],[type,'B->A']]); else addTests([[type,sub]]);
-      rerender(); break;}
-    case 't-up': case 't-down': {const i=+b.dataset.i,k=i+(a==='t-up'?-1:1); [j.tests[i],j.tests[k]]=[j.tests[k],j.tests[i]]; rerender(); break;}
-    case 't-del': {const t=j.tests.splice(+b.dataset.i,1)[0]; j.sets.forEach(x=>x.tests=x.tests.filter(y=>y!==t.id)); rerender(); break;}
-    case 'tests-clear': if(!await askConfirm(`All ${j.tests.length} test(s) will be removed from this job and from its sets.`,{title:'Remove all tests?',ok:'Remove all',danger:true})) return; j.tests=[]; j.sets.forEach(x=>x.tests=[]); rerender(); toast('All tests removed.',{undo:true}); break;
-    case 'tests-all': {if(!await askConfirm(`The tests in the other ${state.jobs.length-1} job(s) will be replaced with this job's ${j.tests.length} test(s), and every set in those jobs will run all of them.`,{title:'Use these tests in all jobs?',ok:'Replace tests'})) return; state.jobs.forEach(x=>{ if(x===j) return; x.tests=j.tests.map(t=>({id:newId('t'),type:t.type,sub:t.sub})); x.sets.forEach(y=>y.tests=x.tests.map(t=>t.id));}); rerender(); toast('Tests copied to every job.',{undo:true}); break;}
-    // sets
-    case 'set-toggle': {const tid=b.dataset.t; s.tests=s.tests.includes(tid)?s.tests.filter(x=>x!==tid):[...s.tests,tid]; rerender(); break;}
-    case 'set-all': s.tests=j.tests.map(t=>t.id); rerender(); break;
-    case 'set-none': s.tests=[]; rerender(); break;
-    case 'set-add': {const ns=newSet(nextSetName(j),j.tests.map(t=>t.id)); j.sets.push(ns); rerender(); flash('set-'+ns.id); toast(`${ns.name} added. Tick its tests, then add or move test points into it.`); break;}
+    // tests of a batch
+    case 'bt-toggle': {const type=b.dataset.type; const i=s.tests.findIndex(t=>t.type===type&&!t.sub); if(i>=0) s.tests.splice(i,1); else s.tests.push(mkTest(type,'')); rerender(); break;}
+    case 'bt-add': case 'bt-both': {const v=readAdder(card); if(!v) return; ui.lastType[s.id]=v.raw; const res=addTestsTo(s,a==='bt-both'?[[v.type,'A->B'],[v.type,'B->A']]:[[v.type,v.sub]]); rerender(); reportAdd(res,s); break;}
+    case 'bt-del': s.tests.splice(+b.dataset.i,1); rerender(); break;
+    case 'bt-left': case 'bt-right': {const i=+b.dataset.i,k=i+(a==='bt-left'?-1:1); [s.tests[i],s.tests[k]]=[s.tests[k],s.tests[i]]; rerender(); break;}
+    case 'bt-clear': s.tests=[]; rerender(); toast(`Removed all tests from ${s.name}.`,{undo:true}); break;
+    case 'bt-to-all': {if(!await askConfirm(`Every other batch in this job will run exactly: ${s.tests.map(testLabel).join(', ')}.`,{title:'Use these tests in all batches?',ok:'Apply to all batches'})) return; j.sets.forEach(x=>{ if(x!==s) x.tests=s.tests.map(t=>mkTest(t.type,t.sub)); }); rerender(); toast('Tests applied to every batch.',{undo:true}); break;}
+    // batches
+    case 'set-add': {const ns=newSet(nextSetName(j),[]); j.sets.push(ns); rerender(); flash('set-'+ns.id); toast(`${ns.name} added. Add its test points (A), then choose its tests (B).`); break;}
     case 'set-up': case 'set-down': {const i=j.sets.indexOf(s), k=i+(a==='set-up'?-1:1); if(k<0||k>=j.sets.length) return; [j.sets[i],j.sets[k]]=[j.sets[k],j.sets[i]]; rerender(); break;}
     case 'set-del': {
       const pts=setPoints(j,s); const other=j.sets[j.sets.indexOf(s)-1]||j.sets[j.sets.indexOf(s)+1];
       if(pts.length){
-        const c=await askChoice({title:`Delete "${setLabel(j,s)}"?`,message:`This set has ${plural(pts.length,'test point')}. What should happen to them?`,choices:[{label:'Cancel',value:null},{label:'Delete them too',value:'del'},{label:`Move them to "${setLabel(j,other)}"`,value:'move',primary:true}]});
+        const c=await askChoice({title:`Delete "${setLabel(j,s)}"?`,message:`This batch has ${plural(pts.length,'test point')}. What should happen to them?`,choices:[{label:'Cancel',value:null},{label:'Delete them too',value:'del'},{label:`Move them to "${setLabel(j,other)}"`,value:'move',primary:true}]});
         if(!c) return;
         if(c==='del') j.points=j.points.filter(p=>p.set!==s.id); else pts.forEach(p=>p.set=other.id);
       }
-      j.sets=j.sets.filter(x=>x!==s); rerender(); toast('Set deleted.',{undo:true}); break;}
+      j.sets=j.sets.filter(x=>x!==s); rerender(); toast('Batch deleted.',{undo:true}); break;}
     // selection
     case 'sel-clear': ui.sel.clear(); syncSelectionUI(); break;
     case 'sel-new': {
       const first=j.points.find(p=>ui.sel.has(p.id)); if(!first) return; const src=setOf(j,first);
       const ns=newSet(nextSetName(j),src.tests); j.sets.splice(j.sets.indexOf(src)+1,0,ns);
       const n=moveSelected(j,ns); rerender(); flash('set-'+ns.id);
-      toast(`Moved ${plural(n,'test point')} to ${ns.name}. Now click the tests to change what this set runs.`,{undo:true}); break;}
+      toast(`Moved ${plural(n,'test point')} to ${ns.name}. It starts with the same tests: change them in step B.`,{undo:true}); break;}
     case 'sel-del': {const n=ui.sel.size; if(!await askConfirm(`${plural(n,'test point')} will be removed from this job.`,{title:'Delete selected test points?',ok:'Delete',danger:true})) return; const had=new Set(j.sets.filter(x=>setPoints(j,x).length).map(x=>x.id)); j.points=j.points.filter(p=>!ui.sel.has(p.id)); ui.sel.clear(); if(j.sets.length>1) removeEmptiedSets(j,had); rerender(); toast(`Deleted ${plural(n,'test point')}.`,{undo:true}); break;}
-    // test points (inside a set)
+    // test points (inside a batch)
     case 'panel-range': case 'panel-paste': {
       const type=a==='panel-range'?'range':'paste';
       if(ui.panel&&ui.panel.set===s.id&&ui.panel.type===type){ ui.panel=null; rerender(); break; }
@@ -1097,10 +1135,10 @@ async function onClick(e){
       if(type==='range'){ ui.range=ui.range||{prefix:'Cable001 - Fiber',start:1,count:12,digits:2,vals:{},counter:{}}; ui.range.start=suggestStart(j,ui.range.prefix); }
       rerender(); if(type==='range') updateRangePreview(); else $('paste-box').focus(); break;}
     case 'panel-close': ui.panel=null; rerender(); break;
-    case 'range-go': {const rows=rangeRows(); if(!rows.length) return; rows.forEach(r=>j.points.push({id:newId('p'),name:r.name,ids:r.ids,set:s.id})); ui.panel=null; rerender(); toast(`Added ${plural(rows.length,'test point')}.`); break;}
-    case 'paste-go': case 'paste-replace': {const rows=parsePasted($('paste-box').value,$('paste-header').checked,s.id); if(!rows.length){toast('Nothing to add. Paste some lines first.');return;} const cur=setPoints(j,s).length; if(a==='paste-replace'){ if(cur&&!await askConfirm(`The ${plural(cur,'test point')} already in ${j.sets.length>1?'this set':'this job'} will be replaced.`,{title:'Replace test points?',ok:'Replace',danger:true})) return; j.points=j.points.filter(p=>p.set!==s.id);} j.points.push(...rows); ui.panel=null; rerender(); toast(`Added ${plural(rows.length,'test point')}.`); break;}
-    case 'add-point': {const sp=setPoints(j,s); const last=sp[sp.length-1]; j.points.push({id:newId('p'),name:'',ids:last?Object.assign({},last.ids):{},set:s.id}); rerender(); const inputs=$('set-'+s.id).querySelectorAll('[data-pf="name"]'); if(inputs.length) inputs[inputs.length-1].focus(); break;}
-    case 'clear-set-points': {const n=setPoints(j,s).length; if(!await askConfirm(`${plural(n,'test point')} will be removed${j.sets.length>1?` from "${setLabel(j,s)}"`:' from this job'}.`,{title:'Remove test points?',ok:'Remove all',danger:true})) return; j.points=j.points.filter(p=>p.set!==s.id); rerender(); toast(`Removed ${plural(n,'test point')}.`,{undo:true}); break;}
+    case 'range-go': {const rows=rangeRows(); if(!rows.length) return; rows.forEach(r=>j.points.push({id:newId('p'),name:r.name,ids:r.ids,set:s.id})); ui.panel=null; rerender(); toast(s.tests.length?`Added ${plural(rows.length,'test point')}.`:`Added ${plural(rows.length,'test point')}. Now choose their tests in step B.`,{undo:true}); break;}
+    case 'paste-go': case 'paste-replace': {const rows=parsePasted($('paste-box').value,$('paste-header').checked,s.id); if(!rows.length){toast('Nothing to add. Paste some lines first.');return;} const cur=setPoints(j,s).length; if(a==='paste-replace'){ if(cur&&!await askConfirm(`The ${plural(cur,'test point')} already in this batch will be replaced.`,{title:'Replace test points?',ok:'Replace',danger:true})) return; j.points=j.points.filter(p=>p.set!==s.id);} j.points.push(...rows); ui.panel=null; rerender(); toast(`Added ${plural(rows.length,'test point')}.`,{undo:true}); break;}
+    case 'add-point': {const sp=setPoints(j,s); const last=sp[sp.length-1]; j.points.push({id:newId('p'),name:'',ids:last?Object.assign({},last.ids):{},set:s.id}); rerender(); const inputs=$('set-'+s.id).querySelectorAll('[data-pf="name"]'); if(inputs.length){ const el=inputs[inputs.length-1]; el.scrollIntoView({block:'nearest'}); el.focus(); } break;}
+    case 'clear-set-points': {const n=setPoints(j,s).length; if(!await askConfirm(`${plural(n,'test point')} will be removed from "${setLabel(j,s)}".`,{title:'Remove test points?',ok:'Remove all',danger:true})) return; j.points=j.points.filter(p=>p.set!==s.id); rerender(); toast(`Removed ${plural(n,'test point')}.`,{undo:true}); break;}
     case 'pt-del': ui.sel.delete(j.points[pi].id); j.points.splice(pi,1); rerender(); break;
     case 'pt-dup': {const c=JSON.parse(JSON.stringify(j.points[pi])); c.id=newId('p'); j.points.splice(pi+1,0,c); rerender(); break;}
     case 'add-col': {const n=await askText('For example Location A, Port or Ribbon. It becomes a column called identifier_<name>, shared by all jobs.','',{title:'Add an identifier column',ok:'Add column',placeholder:'e.g. Location A',validate:colNameCheck(state.idCols)}); if(!n) return; state.idCols.push({id:newId('c'),name:n.trim()}); rerender(); break;}
@@ -1118,15 +1156,16 @@ function onInput(e){
   if(t.dataset.r){ ui.range[t.dataset.r]=t.value; if(t.dataset.r==='prefix'){ ui.range.start=suggestStart(j,t.value); const st=$('r-start'); if(st) st.value=ui.range.start; } updateRangePreview(); return; }
   if(t.dataset.rv){ ui.range.vals[t.dataset.rv]=t.value; updateRangePreview(); return; }
   if(t.id==='fb-msg'&&$('fb-err')){ $('fb-err').textContent=''; return; }
-  if(t.id==='set-filename'){ state.fileName=t.value; save(); return; }
-  if(t.id==='set-workspace'){ state.workspace=t.value; save(); return; }
+  if(t.id==='set-filename'){ state.fileName=t.value; save('typing'); return; }
+  if(t.id==='set-workspace'){ state.workspace=t.value; save('typing'); return; }
 }
 function onChange(e){
   const t=e.target; const j=job();
-  if(t.id==='nt-type'){ refreshTypeHint(); if(t.value===OTHER) $('nt-type-other').focus(); return; }
-  if(t.id==='nt-sub'){ const o=$('nt-sub-other'); o.classList.toggle('hidden',t.value!==OTHER); if(t.value===OTHER) o.focus(); return; }
-  if(t.id==='quick-set'&&t.value){ addTests(QUICK_SETS[t.value]); rerender(); toast('Tests added.'); return; }
-  if(t.id==='copy-tests'&&t.value){ const src=state.jobs.find(x=>x.id===t.value); addTests(src.tests.map(x=>[x.type,x.sub])); rerender(); toast(`Copied ${plural(src.tests.length,'test')}.`); return; }
+  const card=t.closest('[data-set]'); const s=card?j.sets.find(x=>x.id===card.dataset.set):null;
+  if(t.dataset.nt==='type'){ refreshTypeHint(card); if(t.value===OTHER) card.querySelector('[data-nt="type-other"]').focus(); return; }
+  if(t.dataset.nt==='sub'){ const o=card.querySelector('[data-nt="sub-other"]'); o.classList.toggle('hidden',t.value!==OTHER); if(t.value===OTHER) o.focus(); return; }
+  if(t.dataset.nt==='quick'&&t.value){ const res=addTestsTo(s,QUICK_SETS[t.value]); rerender(); if(res.dup) reportAdd(res,s); else toast(`Added ${plural(res.added,'test')} to ${s.name}.`); return; }
+  if(t.dataset.nt==='copy'&&t.value){ const [jid,sid]=t.value.split(':'); const src=state.jobs.find(x=>x.id===jid).sets.find(x=>x.id===sid); const res=addTestsTo(s,src.tests.map(x=>[x.type,x.sub])); rerender(); toast(`Copied ${plural(res.added,'test')} into ${s.name}.`,{undo:true}); return; }
   if(t.id==='sel-target'&&t.value){ const target=j.sets.find(x=>x.id===t.value); const n=moveSelected(j,target); rerender(); flash('set-'+target.id); toast(`Moved ${plural(n,'test point')} to ${setLabel(j,target)}.`,{undo:true}); return; }
   if(t.dataset.rc){ ui.range.counter[t.dataset.rc]=t.checked; const inp=document.querySelector(`[data-rv="${t.dataset.rc}"]`); if(inp) inp.disabled=t.checked; updateRangePreview(); return; }
   if(t.dataset.colname||t.dataset.setname){ rerender(); return; }
@@ -1141,7 +1180,7 @@ function onKeydown(e){
     return;
   }
   if(e.key==='Escape'&&ui.sel.size&&$('modal-back').classList.contains('hidden')){ ui.sel.clear(); syncSelectionUI(); return; }
-  if(e.key==='Enter'&&(t.id==='nt-type-other'||t.id==='nt-sub-other')){ e.preventDefault(); document.querySelector('[data-act="add-test"]').click(); }
+  if(e.key==='Enter'&&(t.dataset.nt==='type-other'||t.dataset.nt==='sub-other')){ e.preventDefault(); t.closest('.set-card').querySelector('[data-act="bt-add"]').click(); }
   if(e.key==='Enter'&&t.dataset.setname){ e.preventDefault(); t.blur(); }
   if(e.key==='Enter'&&t.dataset.pf==='name'){ e.preventDefault(); const row=t.closest('tr'); const next=row.nextElementSibling; if(next) next.querySelector('[data-pf="name"]').focus(); else t.closest('.set-card').querySelector('[data-act="add-point"]').click(); }
 }
@@ -1155,7 +1194,7 @@ function onPaste(e){
   const text=(e.clipboardData||window.clipboardData).getData('text'); if(!/\n/.test(text.trim())&&!/\t/.test(text)) return;
   e.preventDefault(); const j=job(); const pi=j.points.findIndex(p=>p.id===t.closest('[data-pt]').dataset.pt); const rows=parsePasted(text,false,j.points[pi].set);
   if(!String(j.points[pi].name||'').trim()) j.points.splice(pi,1,...rows); else j.points.splice(pi+1,0,...rows);
-  rerender(); toast(`Pasted ${plural(rows.length,'test point')}.`);
+  rerender(); toast(`Pasted ${plural(rows.length,'test point')}.`,{undo:true});
 }
 
 /* ================= IN-PAGE DIALOGS =================
@@ -1216,7 +1255,7 @@ function initModal(){
 }
 async function deleteJob(id){
   const j=state.jobs.find(x=>x.id===id); if(!j) return;
-  const empty=!j.points.length&&!j.tests.length&&!j.assignees.length&&!j.configs.length;
+  const empty=!j.points.length&&!jobTestLabels(j).length&&!j.assignees.length&&!j.configs.length;
   if(!empty&&!await askConfirm(`"${j.name.trim()||'This job'}" and its ${j.points.length} test point(s) will be removed from the file.`,{title:'Delete this job?',ok:'Delete job',danger:true})) return;
   const idx=state.jobs.indexOf(j); state.jobs.splice(idx,1);
   if(!state.jobs.length) state.jobs.push(blankJob('Job-1'));
@@ -1318,11 +1357,15 @@ function importRows(aoa,fileName){
   });
   if(!jobs.length) throw new Error('No jobs found. The first data line must have a value in the "name" column.');
   jobs.forEach(j=>{
-    const labels=[]; j._rows.forEach(r=>r.tests.forEach(t=>{if(!labels.includes(t)) labels.push(t);}));
-    j.tests=labels.map(l=>{const k=l.indexOf('|'); return {id:newId('t'),type:k<0?l:l.slice(0,k),sub:k<0?'':l.slice(k+1)};});
-    j.points=j._rows.filter(r=>r.name||Object.values(r.ids).some(Boolean)||r.tests.length).map(r=>({id:newId('p'),name:r.name,ids:r.ids,off:j.tests.filter(t=>!r.tests.includes(testLabel(t))).map(t=>t.id)}));
-    delete j._rows; j.sets=[]; normalizeJob(j);
-    j.sets.forEach((x,k)=>x.name='Set '+(k+1));
+    // one batch per distinct combination of tests (kept in the order found in the file)
+    j.sets=[]; const byKey=new Map(); j.points=[];
+    j._rows.filter(r=>r.name||Object.values(r.ids).some(Boolean)||r.tests.length).forEach(r=>{
+      const key=r.tests.join('\u0001');
+      if(!byKey.has(key)){ const b={id:newId('s'),name:'Batch '+(j.sets.length+1),tests:r.tests.map(l=>{const k=l.indexOf('|'); return mkTest(k<0?l:l.slice(0,k),k<0?'':l.slice(k+1));})}; byKey.set(key,b); j.sets.push(b); }
+      j.points.push({id:newId('p'),name:r.name,ids:r.ids,set:byKey.get(key).id});
+    });
+    if(!j.sets.length) j.sets.push(newSet('Batch 1',[]));
+    delete j._rows; normalizeJob(j);
   });
   const anyMdy=aoa.slice(1).some(r=>/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(g(r,'dueDate')));
   const anyIso=aoa.slice(1).some(r=>/^\d{4}-\d{2}-\d{2}$/.test(g(r,'dueDate')));
@@ -1342,7 +1385,7 @@ async function openFile(file){
       aoa=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:'',dateNF:'yyyy-mm-dd'});
     }
     const res=importRows(aoa,file.name);
-    const hasWork=state.jobs.some(j=>j.points.length||j.tests.length);
+    const hasWork=state.jobs.some(j=>j.points.length||jobTestLabels(j).length);
     let mode='replace';
     if(hasWork){ mode=await askChoice({title:'Open file',message:`"${file.name}" has ${res.jobs.length} job(s). What should happen to the jobs already on screen?`,choices:[{label:'Cancel',value:null},{label:'Replace them',value:'replace'},{label:'Add to them',value:'add',primary:true}]}); if(!mode) return; }
     if(mode==='replace'){ state.jobs=res.jobs; state.idCols=res.idCols; state.propCols=res.propCols; state.dateFormat=res.dateFormat; state.fileName=res.fileName; }
@@ -1351,7 +1394,7 @@ async function openFile(file){
       matchCols(state.idCols,res.idCols,'ids'); matchCols(state.propCols,res.propCols,'props');
       const names=new Set(state.jobs.map(j=>j.name.trim()));
       res.jobs.forEach(j=>{ if(names.has(j.name.trim())) j.name=dupName(j.name,names); names.add(j.name.trim()); });
-      state.jobs=state.jobs.filter(j=>j.points.length||j.tests.length||j.name.trim()!=='Job-1').concat(res.jobs);
+      state.jobs=state.jobs.filter(j=>j.points.length||jobTestLabels(j).length||j.name.trim()!=='Job-1').concat(res.jobs);
     }
     state.activeJob=res.jobs[0].id; ui.panel=null;
     res.jobs.forEach(j=>{j.assignees.forEach(e=>remember('emails',e)); j.configs.forEach(c=>remember('configs',c));});
@@ -1365,7 +1408,7 @@ async function openFile(file){
 
 /* ================= EXAMPLE (matches the sample job file) ================= */
 async function loadExample(){
-  if(state.jobs.some(j=>j.points.length||j.tests.length)&&!await askConfirm('The example replaces the jobs on screen. Download your file first if you want to keep it.',{title:'Load the example?',ok:'Load example'})) return;
+  if(state.jobs.some(j=>j.points.length||jobTestLabels(j).length)&&!await askConfirm('The example replaces the jobs on screen. Download your file first if you want to keep it.',{title:'Load the example?',ok:'Load example'})) return;
   const cab={id:newId('c'),name:'Cable ID'}, fib={id:newId('c'),name:'Fiber ID'}, reg={id:newId('c'),name:'Region'}, site={id:newId('c'),name:'Site'};
   const pts=()=>[1,2,3,4].map(n=>({id:newId('p'),name:'Cable001 - Fiber0'+n,ids:{[cab.id]:'1',[fib.id]:String(n)},off:[]}));
   const mk=(name,as,cust,due,r,s,tests,cfg)=>{const j=blankJob(name); j.assignees=as; j.company='EXFO'; j.customer=cust; j.dueDate=due; j.props={[reg.id]:r,[site.id]:s}; j.tests=tests.map(([t,sb])=>({id:newId('t'),type:t,sub:sb||''})); j.configs=cfg; j.points=pts(); j.sets=[]; return normalizeJob(j);};
@@ -1396,7 +1439,7 @@ const GUIDE=[
    <li>Create dozens of fibers in one click (for example <code>Cable001 - Fiber01</code> to <code>Fiber48</code>).</li>
    <li>Paste test point lists straight from Excel.</li>
    <li>Test both directions of a fiber (A->B and B->A) on the same test point.</li>
-   <li>Give some test points different tests: put them in their own <b>set</b> and tick the tests that set runs (for example 90 fibers get OTDR, 6 fibers get only FIP).</li>
+   <li>Work in <b>batches</b>: add a batch of test points and choose its tests (only FIP, or two, or many), then add another batch with different tests. Full flexibility inside one job.</li>
    <li>Add your own columns such as Region, Site, Location A or Port.</li>
    <li>Attach test configuration files to a job.</li>
    <li>Open a file you made earlier (CSV or Excel), change it, and download it again.</li>
@@ -1408,11 +1451,11 @@ const GUIDE=[
   <ol class="g-steps">
    <li><b>Name the job.</b> At the top, type a job name such as <code>Job-1</code> or your work order number.</li>
    <li><b>Add details (optional).</b> In section 1 add the technicians' emails, company, customer and due date.</li>
-   <li><b>List the tests.</b> In section 2 pick a test (for example OTDR), choose a direction if needed, and press <b>Add test</b>. Repeat for each test the job needs. Tip: <b>+ Both directions</b> adds A->B and B->A in one go.</li>
-   <li><b>Add the test points.</b> In section 3 press <b>Add a numbered range</b>, type how the names start (e.g. <code>Cable001 - Fiber</code>), the first number and how many. Press <b>Add</b>. The blue ticked buttons above the table show which tests these test points run. Click one to switch it off or on.</li>
+   <li><b>Add your test points (Batch 1, step A).</b> In section 2 press <b>Add a numbered range</b>, type how the names start (e.g. <code>Cable001 - Fiber</code>), the first number and how many. Press <b>Add</b>.</li>
+   <li><b>Choose their tests (Batch 1, step B).</b> Click the tests these test points should run, for example <b>FIP</b>. Click more for several tests. For a direction, pick the test and direction below and press <b>Add</b>, or <b>+ Both directions</b> for A->B and B->A.</li>
    <li><b>Check and download.</b> Scroll to the bottom. If everything is green, press <b>Download CSV</b> and import it on your Exchange jobs page.</li>
   </ol>
-  <div class="tip">Do a few test points need different tests? See <b>Different tests for some test points</b>. It takes two clicks.</div>
+  <div class="tip">Other test points need other tests? Press <b>+ Add another batch</b> and repeat steps 3 and 4 for them. See <b>Batches: different tests</b>.</div>
   <div class="tip">Want to see a finished example first? Press <b>Load example</b> at the top. It loads 5 ready-made jobs you can look at and change.</div>`},
  {id:'multi',title:'Several jobs in one file',html:`
   <h3>Putting several jobs in one file</h3>
@@ -1424,50 +1467,57 @@ const GUIDE=[
    <li>Change only what is different: the test points, the customer, the date, and so on.</li>
   </ol>
   <h4>Different tests per job</h4>
-  <p>Press <b>+ Add job</b> for an empty job and choose its own tests. Each job keeps its own list. You can also use <b>Copy tests from another job</b> in section 2 to start from an existing list and then adjust it.</p>
+  <p>Press <b>+ Add job</b> for an empty job and choose its own tests. Each job keeps its own list. You can also use <b>Copy tests from…</b> in a batch to reuse the tests of any batch in any job, then adjust them.</p>
   <h4>Same test point names in different jobs</h4>
   <p>That is fine. <code>Cable001 - Fiber01</code> can exist in Job-1 and Job-2. Inside one job every test point name must be different.</p>
   <h4>Change tests for every job at once</h4>
   <p>Set up the tests in one job and press <b>Use these tests in all jobs</b>.</p>
   <h4>Order of jobs</h4>
   <p>Use the &#8593; and &#8595; buttons next to the job name to move a job up or down in the file.</p>`},
- {id:'tests',title:'Tests and directions',html:`
+ {id:'tests',title:'Choosing tests',html:`
   <h3>Choosing tests</h3>
-  <p>Section 2 is the list of every test this job needs. Each test becomes a column in the file (<code>testType_01</code>, <code>testType_02</code> and so on), in the order shown.</p>
-  <p>Which test points run which tests is chosen in section 3, with the round tick buttons above each table. New tests are ticked for all test points, so in a simple job there is nothing else to do.</p>
+  <p>Tests are chosen per <b>batch</b>, in step B of each batch. The test points of that batch run exactly those tests. Each test becomes a column in the file (<code>testType_01</code>, <code>testType_02</code> and so on), in the order shown in the blue box.</p>
+  <h4>Three ways to choose</h4>
+  <ul>
+   <li><b>Click a test button</b> (FIP, OTDR, iOLM, Picture…) to add it. Click again to remove it. A tick shows it is chosen.</li>
+   <li><b>With a direction or label:</b> pick the test and the direction below the buttons and press <b>Add</b>. <b>+ Both directions</b> adds A->B and B->A in one go.</li>
+   <li><b>Ready-made combination</b> or <b>Copy tests from…</b> another batch (also from other jobs).</li>
+  </ul>
+  <p>In the blue box, use &#8592; &#8594; to change the order and &times; to remove a test. <b>Use these tests in all batches</b> gives every batch of the job the same tests.</p>
   <h4>What is "direction" (A->B, B->A)?</h4>
-  <p>A fiber has two ends, A and B. <b>A->B</b> means you test from end A towards B. <b>B->A</b> is the opposite way. To test a fiber from both ends, add the same test twice, once with each direction, or press <b>+ Both directions</b>. Both appear on the <b>same</b> test point line, which is how Exchange expects it.</p>
-  <p>Direction is optional. Leave it on <b>None</b> if you do not need it. For iOLM you can also choose iLoop, Bidir or AutoBidir (AutoBidir works on FTBx units only). You may also type any other label, it is just treated as a name.</p>
-  <h4>Some test points need different tests</h4>
-  <p>Use sets. See <b>Different tests for some test points</b> in this guide.</p>
+  <p>A fiber has two ends, A and B. <b>A->B</b> means you test from end A towards B. <b>B->A</b> is the opposite way. To test a fiber from both ends, add the test with both directions. Both appear on the <b>same</b> test point line, which is how Exchange expects it.</p>
+  <p>Direction is optional. For iOLM you can also choose iLoop, Bidir or AutoBidir (AutoBidir works on FTBx units only). You may also type any other label, it is just treated as a name.</p>
   <h4>A test that is not in the list</h4>
-  <p>Choose <b>Other (type your own name)</b> at the bottom of the list. Spelling and capital letters must be exactly right, because test names are case sensitive.</p>
-  <h4>Ready-made combinations</h4>
-  <p>The <b>Add a ready-made set of tests</b> menu adds common combinations, such as OTDR both directions + OLTS.</p>`},
- {id:'sets',title:'Different tests for some test points',html:`
-  <h3>Different tests for some test points (sets)</h3>
-  <p>Test points are kept in <b>sets</b>. A set is simply a group of test points that run the same tests. Most jobs need only one set, and then you never have to think about it.</p>
-  <p>When some test points need different tests, split them into their own set. Example with 96 fibers:</p>
-  <table class="g-table"><tr><th>Set</th><th>Test points</th><th>Runs these tests</th></tr>
-   <tr><td><b>Set 1</b></td><td>Fiber01 to Fiber90</td><td>OTDR|A->B, OTDR|B->A, OLTS|A->B</td></tr>
-   <tr><td><b>Set 2</b></td><td>Fiber91 to Fiber96</td><td>FIP only</td></tr></table>
-  <h4>Change the tests of a few test points (the quick way)</h4>
+  <p>Choose <b>Other (type your own name)</b> in the test list. Spelling and capital letters must be exactly right, because test names are case sensitive.</p>`},
+ {id:'sets',title:'Batches: different tests',html:`
+  <h3>Batches: different tests for different test points</h3>
+  <p>A <b>batch</b> is a group of test points plus the tests they run. Every job starts with Batch 1. Add as many batches as you like, each with its own test points and its own tests.</p>
+  <p>Example with 96 fibers in one job:</p>
+  <table class="g-table"><tr><th>Batch</th><th>A. Test points</th><th>B. Tests</th></tr>
+   <tr><td><b>Batch 1</b></td><td>Fiber01 to Fiber48</td><td>FIP only</td></tr>
+   <tr><td><b>Batch 2</b></td><td>Fiber49 to Fiber90</td><td>FIP, OTDR|A->B, OTDR|B->A</td></tr>
+   <tr><td><b>Batch 3</b></td><td>Fiber91 to Fiber96</td><td>iOLM, OLTS|A->B</td></tr></table>
+  <h4>Build it batch by batch</h4>
   <ol class="g-steps">
-   <li><b>Tick the test points.</b> Tick the box at the start of each line. To pick many at once, tick the first one, hold <b>Shift</b> and tick the last one. Everything in between is selected.</li>
-   <li><b>Press "Move to a new set".</b> A bar appears at the bottom of the screen. The selected test points go into a new set that starts with the same tests.</li>
-   <li><b>Click the tests to change.</b> In the new set, click a round test button to switch it off (grey) or on (blue with a tick). Use <b>tick all</b> or <b>untick all</b> for speed.</li>
+   <li><b>Batch 1, step A:</b> add the first test points (e.g. a numbered range Fiber01 to Fiber48).</li>
+   <li><b>Batch 1, step B:</b> click the tests they need, e.g. <b>FIP</b>.</li>
+   <li>Press <b>+ Add another batch</b>. In Batch 2 add the next test points (the range continues the numbers, e.g. starts at 49) and click their tests.</li>
+   <li>Repeat for as many batches as you need.</li>
   </ol>
-  <h4>Build it set by set</h4>
-  <p>You can also plan it from the start: add the first range of test points and tick its tests, press <b>+ New empty set</b>, add the next range there and tick different tests. Repeat as needed. The numbered range continues the numbers for you (e.g. starts at 91).</p>
+  <h4>Change the tests of a few test points later</h4>
+  <ol class="g-steps">
+   <li>Tick those test points (tick one, hold <b>Shift</b> and tick another to select everything in between).</li>
+   <li>Press <b>Move to a new batch</b> in the bar at the bottom. The new batch starts with the same tests.</li>
+   <li>Change its tests in step B.</li>
+  </ol>
   <h4>Other things you can do</h4>
   <ul>
-   <li><b>Move test points back or between sets:</b> tick them and choose a set in <b>Move to set…</b> in the bottom bar.</li>
-   <li><b>Rename a set:</b> type in its name box (e.g. "Splice closure fibers"). The name is only for you and is not written to the file.</li>
-   <li><b>Order:</b> the &#8593; &#8595; buttons move a set up or down. The file lists test points set by set.</li>
-   <li><b>Delete a set:</b> choose whether to move its test points to another set or delete them.</li>
-   <li><b>A set that runs a test for everything:</b> in section 2 each test shows how many sets use it, e.g. "2 of 3 sets".</li>
+   <li><b>Move test points to another batch:</b> tick them and choose <b>Move to batch…</b> in the bottom bar. They then run that batch's tests.</li>
+   <li><b>Rename a batch:</b> type in its name box (e.g. "Splice closure fibers"). The name is only for you and is not written to the file.</li>
+   <li><b>Order:</b> the &#8593; &#8595; buttons move a batch up or down. The file lists test points batch by batch.</li>
+   <li><b>Delete a batch:</b> choose whether to move its test points to another batch or delete them.</li>
   </ul>
-  <div class="tip">Test point names must be unique across the whole job, including all its sets. A set that becomes empty after a move is removed by itself.</div>`},
+  <div class="tip">Test point names must be unique across the whole job, including all its batches. A batch that becomes empty after a move is removed by itself.</div>`},
  {id:'points',title:'Test points and identifiers',html:`
   <h3>Test points</h3>
   <p>A <b>test point</b> is one thing to test, usually one fiber. Each test point is one line in the file. Its <b>name is required</b> and Exchange also uses it to name the result files, so keep it clear, for example <code>Cable001 - Fiber01</code>.</p>
@@ -1477,9 +1527,9 @@ const GUIDE=[
    <li><b>Paste a list</b>: copy cells from Excel and paste. First column is the name, then one column per identifier, in the order shown.</li>
    <li><b>Add one</b>: adds an empty line. Tip: you can also paste several lines from Excel directly into a name box.</li>
   </ul>
-  <p>Each of these buttons adds test points to the set it belongs to.</p>
+  <p>Each of these buttons adds test points to the batch it belongs to. Long lists scroll inside the table, so the tests (step B) stay close.</p>
   <h4>Selecting test points</h4>
-  <p>Tick the box at the start of a line to select it (Shift + click selects a whole block, the box in the header selects the full set). The bar at the bottom lets you move them to another set, move them to a new set, or delete them. Press <b>Esc</b> to clear the selection.</p>
+  <p>Tick the box at the start of a line to select it (Shift + click selects a whole block, the box in the header selects the full batch). The bar at the bottom lets you move them to another batch, move them to a new batch, or delete them. Press <b>Esc</b> to clear the selection.</p>
   <h4>What are identifiers?</h4>
   <p>Identifiers are extra labels for each test point, like <b>Cable ID</b> and <b>Fiber ID</b>. They become columns called <code>identifier_Cable ID</code> and so on. They are optional.</p>
   <ul>
@@ -1551,9 +1601,9 @@ const GUIDE=[
   <h4>"Test point names must be unique"</h4>
   <p>Two lines in the same job have the same name. Change one of them. Boxes with problems are outlined in red.</p>
   <h4>How do I give 6 of my 96 fibers different tests?</h4>
-  <p>Tick those 6 lines (Shift + click for a block), press <b>Move to a new set</b>, then click the tests in the new set to switch them on or off. Details in <b>Different tests for some test points</b>.</p>
+  <p>Tick those 6 lines (Shift + click for a block), press <b>Move to a new batch</b>, then change the tests of the new batch in its step B. Or build them as separate batches from the start. Details in <b>Batches: different tests</b>.</p>
   <h4>A test does not appear in the file</h4>
-  <p>It is probably not ticked in any set. Check the round buttons above each test point table in section 3.</p>
+  <p>Check step B of each batch: only the tests shown in its blue box are written for its test points.</p>
   <h4>I made a mistake. Can I go back?</h4>
   <p>Yes. Press <b>Undo</b> at the top of the page (or Ctrl+Z, Cmd+Z on a Mac) to step back one change at a time. It remembers your last 100 changes, including deleted jobs, deleted or moved test points, removed tests and even <b>Start over</b>. Press <b>Redo</b> (Ctrl+Y) to go forward again. After a delete or move, a message at the bottom also offers <b>Undo</b>.</p>
   <p>While you are typing inside a box, Ctrl+Z undoes the typing in that box only. Click outside the box first to undo whole changes. The undo history is cleared when you close or reload the page, but your current work stays saved.</p>
